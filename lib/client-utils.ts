@@ -12,8 +12,8 @@ export async function authenticatedFetch(
   session: Session | null,
   options: RequestInit = {}
 ): Promise<Response> {
-  if (!session) {
-    throw new Error('User not authenticated with Supabase. Please log in first.');
+  if (!session?.access_token) {
+    throw new Error('No valid session found. Please log in first.');
   }
   
   // Add the authorization header
@@ -21,10 +21,17 @@ export async function authenticatedFetch(
   headers.set('Authorization', `Bearer ${session.access_token}`);
   
   // Make the request
-  return fetch(url, {
+  const response = await fetch(url, {
     ...options,
     headers,
   });
+
+  // Handle authentication errors
+  if (response.status === 401) {
+    throw new Error('Your session has expired. Please log in again.');
+  }
+
+  return response;
 }
 
 /**
@@ -40,7 +47,16 @@ export async function authenticatedFetchJson<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const response = await authenticatedFetch(url, session, options);
-  return response.json() as Promise<T>;
+  
+  // Parse the JSON response
+  const data = await response.json();
+  
+  // If the response is not ok, throw an error with the error message from the API
+  if (!response.ok) {
+    throw new Error(data.error || 'An error occurred while making the request');
+  }
+  
+  return data as T;
 }
 
 /**

@@ -4,7 +4,8 @@ import {
   GunbrokerAccountInfo, 
   GunbrokerAuthResponse, 
   GunbrokerListingResponse, 
-  GunbrokerOrderResponse 
+  GunbrokerOrderResponse,
+  GunbrokerSearchParams
 } from './types';
 
 // Environment variables
@@ -158,7 +159,10 @@ export class GunbrokerClient {
     }
 
     const tokenData = await tokenResponse.json() as GunbrokerAuthResponse;
-    const expirationDate = new Date(tokenData.expirationDate);
+    // Handle potentially undefined expirationDate
+    const expirationDate = tokenData.expirationDate 
+      ? new Date(tokenData.expirationDate) 
+      : new Date(Date.now() + (tokenData.expiresIn || 3600) * 1000);
 
     // Update the stored integration with the new token
     const { error: updateError } = await this.supabase
@@ -265,6 +269,25 @@ export class GunbrokerClient {
    * @param pageSize - The number of items per page
    */
   async getSoldOrders(page = 1, pageSize = 25): Promise<GunbrokerOrderResponse> {
-    return this.request<GunbrokerOrderResponse>(`/OrdersSold?pageSize=${pageSize}&pageIndex=${page}`);
+    return this.request<GunbrokerOrderResponse>(`/OrdersSold?pageSize=${pageSize}&pageIndex=${page - 1}`);
+  }
+
+  /**
+   * Search for items on Gunbroker
+   * @param params - Search parameters
+   */
+  async searchItems(params: GunbrokerSearchParams): Promise<GunbrokerListingResponse> {
+    // Build query string from params
+    const queryParams = new URLSearchParams();
+    
+    // Add all non-undefined parameters to the query string
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) {
+        queryParams.append(key, value.toString());
+      }
+    });
+    
+    // Make the request
+    return this.request<GunbrokerListingResponse>(`/Items?${queryParams.toString()}`);
   }
 } 

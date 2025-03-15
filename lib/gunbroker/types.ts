@@ -142,4 +142,26 @@ export interface GunbrokerOrder {
   status: string;
   notes: string;
   lastUpdated: string;
+}
+
+// Search parameters for the /Items endpoint
+export interface GunbrokerSearchParams {
+  // Basic search parameters
+  searchText?: string;
+  categoryId?: number;
+  manufacturerId?: number;
+  sellerName?: string;
+  
+  // Filtering parameters
+  minPrice?: number;
+  maxPrice?: number;
+  condition?: string;
+  isNew?: boolean;
+  isUsed?: boolean;
+  
+  // Sorting and pagination
+  sortBy?: 'EndingSoonest' | 'PriceHighToLow' | 'PriceLowToHigh' | 'NewestListed';
+  sortOrder?: 'Ascending' | 'Descending';
+  pageSize?: number;
+  pageIndex?: number;
 } 

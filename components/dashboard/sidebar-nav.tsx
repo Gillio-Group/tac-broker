@@ -11,6 +11,7 @@ import {
   Settings,
   ShoppingCart,
   Users,
+  Search,
 } from 'lucide-react';
 
 const navItems = [
@@ -28,6 +29,11 @@ const navItems = [
     title: 'Orders',
     href: '/dashboard/orders',
     icon: ShoppingCart,
+  },
+  {
+    title: 'Search',
+    href: '/dashboard/search',
+    icon: Search,
   },
   {
     title: 'Analytics',
