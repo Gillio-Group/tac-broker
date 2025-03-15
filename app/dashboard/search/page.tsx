@@ -457,7 +457,7 @@ export default function SearchPage() {
                             <h3 className="font-medium text-sm line-clamp-2">{listing.title}</h3>
                             <div className="mt-2 space-y-1 text-sm text-muted-foreground">
                               <p>Price: ${listing.buyPrice || listing.currentPrice}</p>
-                              <p>Seller: {listing.seller?.userName}</p>
+                              <p>Seller: {listing.seller?.username}</p>
                               <p>Time Left: {listing.timeLeft}</p>
                               <div className="flex gap-2 mt-2">
                                 <Button size="sm" variant="outline">View Details</Button>

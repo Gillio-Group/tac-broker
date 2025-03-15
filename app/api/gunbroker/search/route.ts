@@ -7,6 +7,7 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const GUNBROKER_DEV_KEY = process.env.GUNBROKER_DEV_KEY;
 const GUNBROKER_SANDBOX_DEV_KEY = process.env.GUNBROKER_STAGING_DEV_KEY;
+const GUNBROKER_PRODUCTION_DEV_KEY = process.env.GUNBROKER_PRODUCTION_DEV_KEY;
 const GUNBROKER_API_URL = 'https://api.gunbroker.com';
 const GUNBROKER_SANDBOX_API_URL = 'https://api.sandbox.gunbroker.com';
 
@@ -84,7 +85,7 @@ async function refreshGunbrokerToken(integration: any, supabase: any) {
 
     // Determine which API URL to use
     const apiUrl = integration.is_sandbox ? GUNBROKER_SANDBOX_API_URL : GUNBROKER_API_URL;
-    const devKey = integration.is_sandbox ? GUNBROKER_SANDBOX_DEV_KEY : GUNBROKER_DEV_KEY;
+    const devKey = integration.is_sandbox ? GUNBROKER_SANDBOX_DEV_KEY : GUNBROKER_PRODUCTION_DEV_KEY;
 
     // Get a new access token from Gunbroker
     const tokenResponse = await fetch(`${apiUrl}/v1/Users/AccessToken`, {
@@ -220,7 +221,7 @@ export async function GET(request: NextRequest) {
       
       // Determine which API URL and dev key to use
       const apiUrl = integration.is_sandbox ? GUNBROKER_SANDBOX_API_URL : GUNBROKER_API_URL;
-      const devKey = integration.is_sandbox ? GUNBROKER_SANDBOX_DEV_KEY : GUNBROKER_DEV_KEY;
+      const devKey = integration.is_sandbox ? GUNBROKER_SANDBOX_DEV_KEY : GUNBROKER_PRODUCTION_DEV_KEY;
 
       // Validate dev key
       if (!devKey) {
