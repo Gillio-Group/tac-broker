@@ -1,0 +1,12 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+For Next.js 15 projects, always use localStorage instead of cookies for authentication state. 
+Check both context and localStorage for authentication status.
+Never rely solely on cookies for auth in Next.js 15.quired and prohibited patterns.
+3. **Automatic Application**: The rule will be applied whenever related files are referenced.
+4. **Framework-Specific**: The rule targets only the auth-related files in your Next.js 15 project.
+
+This will help ensure consistent implementation of the localStorage authentication pattern throughout your Next.js 15 project, avoiding the cookie parsing issues.
