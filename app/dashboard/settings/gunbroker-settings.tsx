@@ -9,6 +9,7 @@ interface GunbrokerIntegration {
   id: string;
   username: string;
   is_sandbox: boolean;
+  token_expires_at: string;
   last_connected_at: string;
 }
 
@@ -103,6 +104,9 @@ export default function GunbrokerSettings() {
                   </p>
                   <p className="text-xs text-muted-foreground">
                     Connected: {new Date(integration.last_connected_at).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Expires: {new Date(integration.token_expires_at).toLocaleString()}
                   </p>
                 </div>
                 <Button 
