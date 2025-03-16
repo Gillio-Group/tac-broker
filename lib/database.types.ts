@@ -16,7 +16,6 @@ export interface Database {
           username: string;
           encrypted_password: string;
           access_token: string;
-          token_expires_at: string;
           is_sandbox: boolean;
           is_active: boolean;
           created_at: string;
@@ -29,7 +28,6 @@ export interface Database {
           username: string;
           encrypted_password: string;
           access_token: string;
-          token_expires_at: string;
           is_sandbox?: boolean;
           is_active?: boolean;
           created_at?: string;
@@ -42,7 +40,6 @@ export interface Database {
           username?: string;
           encrypted_password?: string;
           access_token?: string;
-          token_expires_at?: string;
           is_sandbox?: boolean;
           is_active?: boolean;
           created_at?: string;

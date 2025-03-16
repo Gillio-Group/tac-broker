@@ -148,7 +148,6 @@ CREATE TABLE IF NOT EXISTS "public"."gunbroker_integrations" (
     "username" "text" NOT NULL,
     "is_sandbox" boolean DEFAULT false NOT NULL,
     "access_token" "text",
-    "token_expires_at" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
     "is_active" boolean DEFAULT true,
@@ -336,10 +335,6 @@ CREATE POLICY "Users can update their own listings" ON "public"."listings" FOR U
 
 
 CREATE POLICY "Users can update their own orders" ON "public"."orders" FOR UPDATE USING (("auth"."uid"() = "user_id"));
-
-
-
-CREATE POLICY "Users can update their own profile" ON "public"."profiles" FOR UPDATE USING (("auth"."uid"() = "id"));
 
 
 
@@ -684,3 +679,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TAB
 
 
 RESET ALL;
+
+-- Remove token_expires_at column since we're refreshing tokens on every request
+ALTER TABLE "public"."gunbroker_integrations" DROP COLUMN IF EXISTS "token_expires_at";

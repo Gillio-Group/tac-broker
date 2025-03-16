@@ -106,17 +106,8 @@ export class GunbrokerClient {
       throw new Error('Gunbroker client not initialized');
     }
 
-    // Check if the current token is expired
-    const tokenExpiry = new Date(this.integration.token_expires_at);
-    const now = new Date();
-    
-    // If the token expires within the next 5 minutes, refresh it
-    const tokenNeedsRefresh = tokenExpiry.getTime() - now.getTime() < 5 * 60 * 1000;
-
-    if (tokenNeedsRefresh) {
-      await this.refreshAccessToken();
-    }
-
+    // Always refresh the token before any API call
+    await this.refreshAccessToken();
     return this.integration.access_token;
   }
 
@@ -128,60 +119,60 @@ export class GunbrokerClient {
       throw new Error('GUNBROKER_DEV_KEY environment variable is not set');
     }
 
-    // Get the decrypted password
-    const { data: decryptedPassword, error: decryptionError } = await this.supabase.rpc(
-      'decrypt_password',
-      { encrypted_password: this.integration.encrypted_password }
-    );
+    try {
+      // Get the decrypted password
+      const { data: decryptedPassword, error: decryptionError } = await this.supabase.rpc(
+        'decrypt_password',
+        { encrypted_password: this.integration.encrypted_password }
+      );
 
-    if (decryptionError) {
-      console.error('Error decrypting password:', decryptionError);
-      throw new Error('Failed to decrypt credentials');
+      if (decryptionError) {
+        console.error('Error decrypting password:', decryptionError);
+        throw new Error('Failed to decrypt credentials');
+      }
+
+      // Create form data for the request
+      const formData = new URLSearchParams();
+      formData.append('Username', this.integration.username);
+      formData.append('Password', decryptedPassword);
+
+      // Get a new access token from Gunbroker
+      const tokenResponse = await fetch(`${this.baseUrl}/Users/AccessToken`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-DevKey': GUNBROKER_DEV_KEY,
+        },
+        body: formData.toString(),
+      });
+
+      if (!tokenResponse.ok) {
+        throw new Error(`Failed to refresh token: ${tokenResponse.statusText}`);
+      }
+
+      const tokenData = await tokenResponse.json() as GunbrokerAuthResponse;
+
+      // Update the stored integration with the new token
+      const { error: updateError } = await this.supabase
+        .from('gunbroker_integrations')
+        .update({
+          access_token: tokenData.accessToken,
+          last_connected_at: new Date().toISOString(),
+        })
+        .eq('id', this.integration.id);
+
+      if (updateError) {
+        console.error('Error updating token:', updateError);
+        throw new Error('Failed to update access token');
+      }
+
+      // Update the local integration object
+      this.integration.access_token = tokenData.accessToken;
+      this.integration.last_connected_at = new Date().toISOString();
+    } catch (error) {
+      console.error('Error refreshing Gunbroker token:', error);
+      throw error;
     }
-
-    // Create form data for the request
-    const formData = new URLSearchParams();
-    formData.append('Username', this.integration.username);
-    formData.append('Password', decryptedPassword);
-
-    // Get a new access token from Gunbroker
-    const tokenResponse = await fetch(`${this.baseUrl}/Users/AccessToken`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'X-DevKey': GUNBROKER_DEV_KEY,
-      },
-      body: formData.toString(),
-    });
-
-    if (!tokenResponse.ok) {
-      throw new Error(`Failed to refresh token: ${tokenResponse.statusText}`);
-    }
-
-    const tokenData = await tokenResponse.json() as GunbrokerAuthResponse;
-    // Handle potentially undefined expirationDate
-    const expirationDate = tokenData.expirationDate 
-      ? new Date(tokenData.expirationDate) 
-      : new Date(Date.now() + (tokenData.expiresIn || 3600) * 1000);
-
-    // Update the stored integration with the new token
-    const { error: updateError } = await this.supabase
-      .from('gunbroker_integrations')
-      .update({
-        access_token: tokenData.accessToken,
-        token_expires_at: expirationDate.toISOString(),
-        last_connected_at: new Date().toISOString(),
-      })
-      .eq('id', this.integration.id);
-
-    if (updateError) {
-      console.error('Error updating token:', updateError);
-      throw new Error('Failed to update access token');
-    }
-
-    // Update the local integration object
-    this.integration.access_token = tokenData.accessToken;
-    this.integration.token_expires_at = expirationDate.toISOString();
   }
 
   /**
