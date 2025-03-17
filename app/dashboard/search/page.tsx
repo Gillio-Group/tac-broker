@@ -154,15 +154,8 @@ export default function SearchPage() {
         };
       }
       
-      // Create API query params, transforming sortBy to Sort for Gunbroker API
-      const apiParams = new URLSearchParams(queryString);
-      if (apiParams.has('sortBy')) {
-        const sortValue = apiParams.get('sortBy');
-        apiParams.delete('sortBy');
-        apiParams.append('Sort', sortValue!);
-      }
-      
-      console.log('Making search request with params:', apiParams.toString());
+      // Make the request with the original query string - let the API handle parameter transformation
+      console.log('Making search request with params:', queryString);
       
       // Get current session
       let currentSession = session;
@@ -175,7 +168,7 @@ export default function SearchPage() {
         throw new Error('No valid session found');
       }
       
-      const response = await authenticatedFetchJson(`/api/gunbroker/search?${apiParams.toString()}`, currentSession);
+      const response = await authenticatedFetchJson(`/api/gunbroker/search?${queryString}`, currentSession);
       
       // Type guard to ensure response matches our expected structure
       const typedResponse = response as SearchResponse;

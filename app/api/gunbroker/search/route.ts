@@ -178,10 +178,15 @@ export async function GET(request: NextRequest) {
       searchParams.append('Condition', condition);
     }
     
-    // Add Sort parameter
-    const sort = request.nextUrl.searchParams.get('sortBy');
-    if (sort) {
-      searchParams.append('Sort', sort);
+    // Add Sort parameter - transform sortBy to Sort
+    const sortBy = request.nextUrl.searchParams.get('sortBy');
+    if (sortBy) {
+      searchParams.append('Sort', sortBy);
+      console.log('Added Sort parameter:', sortBy);
+    } else {
+      // Default to Featured and Relevance (13)
+      searchParams.append('Sort', '13');
+      console.log('Using default Sort parameter: 13');
     }
     
     // Handle Auctions Only filter
