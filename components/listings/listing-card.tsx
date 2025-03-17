@@ -8,17 +8,48 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
+interface GunbrokerListing {
+  itemID: number;
+  title: string;
+  price: number;
+  thumbnailURL?: string;
+  timeLeft?: string;
+  isFixedPrice?: boolean;
+  hasBuyNow?: boolean;
+  isFeaturedItem?: boolean;
+  freeShippingAvailable?: boolean;
+  hasReserve?: boolean;
+  hasReserveBeenMet?: boolean;
+  quantity?: number;
+  bidCount?: number;
+  seller?: {
+    username: string;
+  };
+}
+
 interface ListingCardProps {
-  listing: any; // Using any type since we're working with the direct API response
+  listing: GunbrokerListing;
 }
 
 export function ListingCard({ listing }: ListingCardProps) {
+  // Debug logging
+  console.log('ListingCard received data:', {
+    listingId: listing?.itemID,
+    title: listing?.title,
+    price: listing?.price,
+    fullListing: listing
+  });
+
+  if (!listing) {
+    return null;
+  }
+
   // Format the price
   const formattedPrice = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
-  }).format(listing.price || 0);
-  
+  }).format(listing?.price ?? 0);
+
   // Format the time left
   const formatTimeLeft = (timeLeft: string) => {
     if (!timeLeft) return 'Unknown';
@@ -70,9 +101,6 @@ export function ListingCard({ listing }: ListingCardProps) {
     }
   };
   
-  // External link to Gunbroker
-  const externalUrl = `https://www.gunbroker.com/item/${listing.itemID}`;
-  
   return (
     <Card className="overflow-hidden flex flex-col h-full">
       <div className="relative aspect-video bg-muted">
@@ -80,7 +108,7 @@ export function ListingCard({ listing }: ListingCardProps) {
           <div className="relative w-full h-full">
             <img
               src={listing.thumbnailURL}
-              alt={listing.title}
+              alt={listing.title || 'Product image'}
               className="object-cover w-full h-full"
               onError={(e) => {
                 // Hide the image on error
@@ -110,7 +138,7 @@ export function ListingCard({ listing }: ListingCardProps) {
       
       <CardContent className="p-4 flex-grow">
         <div className="flex justify-between items-start mb-2">
-          <h3 className="font-semibold line-clamp-2">{listing.title}</h3>
+          <h3 className="font-semibold line-clamp-2">{listing.title || 'Untitled Listing'}</h3>
         </div>
         
         <div className="flex items-center justify-between mb-2">
@@ -127,18 +155,20 @@ export function ListingCard({ listing }: ListingCardProps) {
             <span>Seller: {listing.seller?.username || 'Unknown'}</span>
           </div>
           
-          <div className="flex items-center">
-            <Clock className="h-4 w-4 mr-1" />
-            <span>Time Left: {formatTimeLeft(listing.timeLeft)}</span>
-          </div>
+          {listing.timeLeft && (
+            <div className="flex items-center">
+              <Clock className="h-4 w-4 mr-1" />
+              <span>Time Left: {formatTimeLeft(listing.timeLeft)}</span>
+            </div>
+          )}
           
-          {listing.bidCount > 0 && (
+          {(listing.bidCount ?? 0) > 0 && (
             <div className="flex items-center">
               <span>Bids: {listing.bidCount}</span>
             </div>
           )}
           
-          {listing.quantity > 1 && (
+          {(listing.quantity ?? 0) > 1 && (
             <div className="flex items-center">
               <span>Quantity: {listing.quantity}</span>
             </div>
@@ -178,7 +208,7 @@ export function ListingCard({ listing }: ListingCardProps) {
             </Link>
           </Button>
           <Button asChild variant="ghost" size="icon">
-            <a href={externalUrl} target="_blank" rel="noopener noreferrer">
+            <a href={`https://www.gunbroker.com/item/${listing.itemID}`} target="_blank" rel="noopener noreferrer">
               <ExternalLink className="h-4 w-4" />
               <span className="sr-only">View on Gunbroker</span>
             </a>

@@ -2,9 +2,8 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
-import { getSessionFromLocalStorage, saveSessionToLocalStorage, clearSessionFromLocalStorage, isValidSession } from '@/lib/auth-utils';
+import { createClient } from '@/lib/supabase/client';
 
 interface SupabaseContextType {
   user: User | null;
@@ -25,6 +24,7 @@ export function SupabaseAuthProvider({ children }: { children: React.ReactNode }
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
+  const supabase = createClient();
 
   useEffect(() => {
     let mounted = true;
@@ -33,28 +33,7 @@ export function SupabaseAuthProvider({ children }: { children: React.ReactNode }
       try {
         console.log('Initializing auth state...');
         
-        // First try to get session from localStorage
-        const storedSession = getSessionFromLocalStorage();
-        
-        if (storedSession && isValidSession(storedSession)) {
-          console.log('Found valid session in localStorage');
-          
-          // Set the session in Supabase client
-          const { error: sessionError } = await supabase.auth.setSession({
-            access_token: storedSession.access_token,
-            refresh_token: storedSession.refresh_token,
-          });
-
-          if (sessionError) {
-            console.error('Error setting stored session:', sessionError);
-            clearSessionFromLocalStorage();
-          } else if (mounted) {
-            setSession(storedSession);
-            setUser(storedSession.user);
-          }
-        }
-        
-        // Then get the current session from Supabase
+        // Get the current session from Supabase (now using cookies via the SSR package)
         const { data: { session: currentSession }, error: sessionError } = await supabase.auth.getSession();
         
         if (sessionError) {
@@ -66,7 +45,6 @@ export function SupabaseAuthProvider({ children }: { children: React.ReactNode }
           console.log('Got current session from Supabase');
           setSession(currentSession);
           setUser(currentSession.user);
-          saveSessionToLocalStorage(currentSession);
         }
       } catch (error) {
         console.error('Error in auth initialization:', error);
@@ -88,12 +66,7 @@ export function SupabaseAuthProvider({ children }: { children: React.ReactNode }
         console.log('Setting new session');
         setSession(currentSession);
         setUser(currentSession.user);
-        saveSessionToLocalStorage(currentSession);
       } else {
-        if (event === 'SIGNED_OUT') {
-          console.log('User signed out, clearing session');
-          clearSessionFromLocalStorage();
-        }
         if (mounted) {
           setSession(null);
           setUser(null);
@@ -108,14 +81,10 @@ export function SupabaseAuthProvider({ children }: { children: React.ReactNode }
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [router]);
+  }, [router, supabase.auth]);
 
   const signOut = async () => {
     try {
-      // First clear localStorage
-      clearSessionFromLocalStorage();
-      
-      // Then sign out with Supabase
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
       
@@ -127,8 +96,6 @@ export function SupabaseAuthProvider({ children }: { children: React.ReactNode }
       router.push('/login');
     } catch (error) {
       console.error('Error signing out:', error);
-      // Force clear on error
-      clearSessionFromLocalStorage();
       router.push('/login');
     }
   };

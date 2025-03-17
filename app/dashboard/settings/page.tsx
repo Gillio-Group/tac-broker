@@ -5,13 +5,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase/client';
+import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { Settings, User, Store } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import GunbrokerSettings from './gunbroker-settings';
 import { useAuth } from '@/components/providers/supabase-auth-provider';
-import { getSessionFromLocalStorage } from '@/lib/auth-utils';
 import { ensureUserProfile, type Profile } from '@/lib/profile-utils';
 
 export default function SettingsPage() {
@@ -22,6 +21,7 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const { session } = useAuth();
+  const supabase = createClient();
 
   useEffect(() => {
     async function fetchUserData() {
@@ -31,9 +31,10 @@ export default function SettingsPage() {
         // First check context session
         let currentSession = session;
         
-        // If no context session, check localStorage
+        // If no context session, get it from Supabase
         if (!currentSession) {
-          currentSession = getSessionFromLocalStorage();
+          const { data: { session: fetchedSession } } = await supabase.auth.getSession();
+          currentSession = fetchedSession;
         }
         
         // If still no session, redirect to login
@@ -121,11 +122,7 @@ export default function SettingsPage() {
     try {
       setIsSigningOut(true);
       
-      // Clear session from localStorage first
-      const { clearSessionFromLocalStorage } = await import('@/lib/auth-utils');
-      clearSessionFromLocalStorage();
-      
-      // Then sign out with Supabase
+      // Sign out with Supabase (cookies will be cleared automatically)
       await supabase.auth.signOut();
       
       toast.success('Signed out successfully');
@@ -134,8 +131,7 @@ export default function SettingsPage() {
       console.error('Sign out error:', error);
       toast.error('Failed to sign out: ' + error.message);
       
-      // Force clear session and redirect on error
-      localStorage.clear();
+      // Force redirect on error
       router.replace('/login');
     } finally {
       setIsSigningOut(false);
@@ -204,36 +200,40 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">User ID</p>
-                  <p className="font-mono text-xs">{user?.id}</p>
+                  <p className="text-xs text-muted-foreground">{user?.id}</p>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Created At</p>
-                  <p>{profile ? new Date(profile.created_at).toLocaleDateString() : 'Unknown'}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Last Sign In</p>
-                  <p>{user?.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleDateString() : 'Unknown'}</p>
-                </div>
+              </div>
+              
+              <div className="pt-4">
+                <Button 
+                  variant="destructive" 
+                  onClick={handleSignOut} 
+                  disabled={isSigningOut}
+                >
+                  {isSigningOut ? 'Signing out...' : 'Sign Out'}
+                </Button>
               </div>
             </CardContent>
           </Card>
         </div>
         
-        {/* Gunbroker Integrations Section */}
+        {/* Integrations Section */}
         <div>
-          <h2 className="text-xl font-semibold mb-4">Gunbroker Integrations</h2>
-          <GunbrokerSettings />
-        </div>
-        
-        {/* Sign Out Section */}
-        <div className="mt-8">
-          <Button 
-            variant="destructive" 
-            onClick={handleSignOut}
-            disabled={isSigningOut}
-          >
-            {isSigningOut ? 'Signing Out...' : 'Sign Out'}
-          </Button>
+          <h2 className="text-xl font-semibold mb-4">Integrations</h2>
+          <Tabs defaultValue="gunbroker">
+            <TabsList className="mb-4">
+              <TabsTrigger value="gunbroker">
+                <Store className="h-4 w-4 mr-2" />
+                Gunbroker
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="gunbroker">
+              <GunbrokerSettings 
+                integrations={gunbrokerIntegrations} 
+                onDisconnect={handleDisconnectGunbroker} 
+              />
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
     </div>

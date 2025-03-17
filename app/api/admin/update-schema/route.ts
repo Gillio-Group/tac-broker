@@ -1,38 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 import { Database } from '@/lib/database.types';
 
 // This is a one-time route to update the database schema
 // It should be protected and only accessible to admins
-export async function POST(request: NextRequest) {
+export async function POST() {
   try {
-    // Get the authorization token
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json({ 
-        success: false, 
-        error: 'Authentication required' 
-      }, { status: 401 });
-    }
-    
-    const token = authHeader.split(' ')[1];
-    
-    // Create Supabase client
-    const supabase = createClient<Database>(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+    // Create a Supabase client using cookies
+    const cookieStore = await cookies();
+    const supabase = createServerClient<Database>(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false,
+        cookies: {
+          getAll() {
+            return cookieStore.getAll().map(cookie => ({
+              name: cookie.name,
+              value: cookie.value,
+            }));
+          },
+          setAll(cookies) {
+            cookies.forEach(({ name, value, options }) => {
+              try {
+                cookieStore.set(name, value, options);
+              } catch (error) {
+                console.error('Error setting cookie:', error);
+              }
+            });
+          },
         },
       }
     );
     
-    // Verify the user is an admin
-    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+    // Get the current user from the session
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     
-    if (userError || !user) {
+    if (authError || !user) {
       return NextResponse.json({ 
         success: false, 
         error: 'Authentication required' 
@@ -61,11 +65,11 @@ export async function POST(request: NextRequest) {
       success: true, 
       message: 'Schema updated successfully' 
     });
-  } catch (error: any) {
+  } catch (error: Error) {
     console.error('Error in update schema:', error);
     return NextResponse.json({ 
       success: false, 
-      error: error.message || 'An unexpected error occurred' 
+      error: error instanceof Error ? error.message : 'An unexpected error occurred' 
     }, { status: 500 });
   }
-} 
+}

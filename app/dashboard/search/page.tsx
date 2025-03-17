@@ -20,7 +20,8 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { useAuth } from '@/components/providers/supabase-auth-provider';
 import { authenticatedFetchJson } from '@/lib/client-utils';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { getSessionFromLocalStorage } from '@/lib/auth-utils';
+import { createClient } from '@/lib/supabase/client';
+import { Checkbox } from '@/components/ui/checkbox';
 
 // Define the form schema
 const searchFormSchema = z.object({
@@ -30,26 +31,65 @@ const searchFormSchema = z.object({
   maxPrice: z.string().optional(),
   condition: z.string().optional(),
   sortBy: z.string().optional(),
+  auctionsOnly: z.boolean().optional(),
 });
 
 type SearchFormValues = z.infer<typeof searchFormSchema>;
 
+// Define the search response type
+interface SearchResult {
+  itemID: number;
+  title: string;
+  price: number;
+  thumbnailURL?: string;
+  timeLeft?: string;
+  isFixedPrice?: boolean;
+  hasBuyNow?: boolean;
+  isFeaturedItem?: boolean;
+  freeShippingAvailable?: boolean;
+  hasReserve?: boolean;
+  hasReserveBeenMet?: boolean;
+  quantity?: number;
+  bidCount?: number;
+  seller?: {
+    username: string;
+  };
+}
+
+interface SearchResponse {
+  results: SearchResult[];
+  totalResults: number;
+  pageSize: number;
+  pageIndex: number;
+  maxPages: number;
+  hasMoreItems: boolean;
+}
+
 export default function SearchPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [page, setPage] = useState(1);
+  const [pageIndex, setPageIndex] = useState(1);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const { session } = useAuth();
+  const supabase = createClient();
   
   // Check for session on mount and when session changes
   useEffect(() => {
-    if (!session) {
-      console.log('No session found, redirecting to login');
-      router.push(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
-      return;
+    async function checkSession() {
+      if (!session) {
+        // Try to get session from Supabase
+        const { data: { session: supabaseSession } } = await supabase.auth.getSession();
+        
+        if (!supabaseSession) {
+          console.log('No session found, redirecting to login');
+          router.push(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
+        }
+      }
     }
-  }, [session, router]);
+    
+    checkSession();
+  }, [session, router, supabase.auth]);
 
   // Initialize form with URL search params
   const form = useForm<SearchFormValues>({
@@ -59,8 +99,9 @@ export default function SearchPage() {
       categoryId: searchParams.get('categoryId') || '',
       minPrice: searchParams.get('minPrice') || '',
       maxPrice: searchParams.get('maxPrice') || '',
-      condition: searchParams.get('condition') || '',
-      sortBy: searchParams.get('sortBy') || 'EndingSoonest',
+      condition: searchParams.get('condition') || '0',
+      sortBy: searchParams.get('sortBy') || '13',
+      auctionsOnly: searchParams.get('auctionsOnly') === 'true',
     },
   });
 
@@ -68,56 +109,108 @@ export default function SearchPage() {
   useEffect(() => {
     const pageParam = searchParams.get('page');
     if (pageParam) {
-      setPage(parseInt(pageParam));
+      setPageIndex(parseInt(pageParam));
     } else {
-      setPage(1);
+      setPageIndex(1);
     }
   }, [searchParams]);
 
   // Build query parameters for API call
+  const pageSize = 25; // Fixed page size
   const buildQueryParams = (formValues: SearchFormValues, currentPage: number) => {
     const params = new URLSearchParams();
     
     if (formValues.searchText) params.append('searchText', formValues.searchText);
-    if (formValues.categoryId) params.append('categoryId', formValues.categoryId);
+    if (formValues.categoryId && formValues.categoryId !== 'all') params.append('categoryId', formValues.categoryId);
     if (formValues.minPrice) params.append('minPrice', formValues.minPrice);
     if (formValues.maxPrice) params.append('maxPrice', formValues.maxPrice);
-    if (formValues.condition) params.append('condition', formValues.condition);
+    if (formValues.condition && formValues.condition !== '0') params.append('condition', formValues.condition);
     if (formValues.sortBy) params.append('sortBy', formValues.sortBy);
+    if (formValues.auctionsOnly) params.append('auctionsOnly', 'true');
     
-    params.append('page', currentPage.toString());
-    params.append('pageSize', '25');
+    params.append('pageIndex', currentPage.toString());
+    params.append('pageSize', pageSize.toString());
     
     return params.toString();
   };
 
   // Get current form values for query
   const currentValues = form.getValues();
-  const queryString = buildQueryParams(currentValues, page);
+  const queryString = buildQueryParams(currentValues, pageIndex);
   
   // Fetch search results
-  const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['gunbroker-search', queryString],
+  const { data, isLoading, isError, error } = useQuery<SearchResponse>({
+    queryKey: ['gunbroker-search', queryString, session?.access_token],
     queryFn: async () => {
       if (!currentValues.searchText && !currentValues.categoryId) {
         // Don't search if no main criteria provided
-        return { results: [], count: 0, totalResults: 0, pageSize: 25, currentPage: 0, maxPages: 0 };
+        return { 
+          results: [], 
+          totalResults: 0, 
+          pageSize: 25, 
+          pageIndex: 1, 
+          maxPages: 1, 
+          hasMoreItems: false 
+        };
       }
       
-      console.log('Making search request with params:', queryString);
-      const localSession = getSessionFromLocalStorage();
-      const response = await authenticatedFetchJson(`/api/gunbroker/search?${queryString}`, localSession || session);
+      // Create API query params, transforming sortBy to Sort for Gunbroker API
+      const apiParams = new URLSearchParams(queryString);
+      if (apiParams.has('sortBy')) {
+        const sortValue = apiParams.get('sortBy');
+        apiParams.delete('sortBy');
+        apiParams.append('Sort', sortValue!);
+      }
+      
+      console.log('Making search request with params:', apiParams.toString());
+      
+      // Get current session
+      let currentSession = session;
+      if (!currentSession) {
+        const { data: { session: fetchedSession } } = await supabase.auth.getSession();
+        currentSession = fetchedSession;
+      }
+      
+      if (!currentSession) {
+        throw new Error('No valid session found');
+      }
+      
+      const response = await authenticatedFetchJson(`/api/gunbroker/search?${apiParams.toString()}`, currentSession);
+      
+      // Type guard to ensure response matches our expected structure
+      const typedResponse = response as SearchResponse;
+      if (!typedResponse || typeof typedResponse !== 'object') {
+        throw new Error('Invalid response format');
+      }
+
+      // Ensure required fields exist with proper types
+      const validatedResponse: SearchResponse = {
+        results: Array.isArray(typedResponse.results) ? typedResponse.results : [],
+        totalResults: typeof typedResponse.totalResults === 'number' ? typedResponse.totalResults : 0,
+        pageSize: typeof typedResponse.pageSize === 'number' ? typedResponse.pageSize : pageSize,
+        pageIndex: typeof typedResponse.pageIndex === 'number' ? typedResponse.pageIndex : 1,
+        maxPages: typeof typedResponse.maxPages === 'number' ? typedResponse.maxPages : 1,
+        hasMoreItems: Boolean(typedResponse.hasMoreItems)
+      };
+
       console.log('Search API Response:', {
-        totalResults: response.totalResults,
-        currentPage: response.currentPage,
-        pageSize: response.pageSize,
-        maxPages: response.maxPages,
-        resultCount: response.results?.length,
-        firstResult: response.results?.[0],
+        totalResults: validatedResponse.totalResults,
+        pageIndex: validatedResponse.pageIndex,
+        pageSize: validatedResponse.pageSize,
+        maxPages: validatedResponse.maxPages,
+        resultCount: validatedResponse.results?.length,
+        firstResult: validatedResponse.results?.[0],
+        sampleResult: validatedResponse.results?.[0] ? {
+          itemID: validatedResponse.results[0].itemID,
+          title: validatedResponse.results[0].title,
+          price: validatedResponse.results[0].price,
+          thumbnailURL: validatedResponse.results[0].thumbnailURL,
+        } : null
       });
-      return response;
+
+      return validatedResponse;
     },
-    enabled: (!!currentValues.searchText || !!currentValues.categoryId) && (!!session || !!getSessionFromLocalStorage()),
+    enabled: (!!currentValues.searchText || !!currentValues.categoryId) && !!session,
   });
 
   // Add effect to log data changes
@@ -126,15 +219,21 @@ export default function SearchPage() {
       console.log('Search Results Updated:', {
         hasResults: !!data.results?.length,
         totalResults: data.totalResults,
-        currentPage: data.currentPage,
+        pageIndex: data.pageIndex,
         resultCount: data.results?.length,
+        sampleResult: data.results?.[0] ? {
+          itemID: data.results[0].itemID,
+          title: data.results[0].title,
+          price: data.results[0].price,
+          thumbnailURL: data.results[0].thumbnailURL,
+        } : null
       });
     }
   }, [data]);
 
   // Handle form submission
   const onSubmit = (values: SearchFormValues) => {
-    setPage(1); // Reset to first page on new search
+    setPageIndex(1); // Reset to first page on new search
     
     // Update URL with search params
     const params = new URLSearchParams();
@@ -144,23 +243,49 @@ export default function SearchPage() {
     if (values.maxPrice) params.append('maxPrice', values.maxPrice);
     if (values.condition) params.append('condition', values.condition);
     if (values.sortBy) params.append('sortBy', values.sortBy);
+    if (values.auctionsOnly) params.append('auctionsOnly', 'true');
     
     router.push(`/dashboard/search?${params.toString()}`);
   };
 
-  // Handle pagination
-  const handlePageChange = (newPage: number) => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set('page', newPage.toString());
-    router.push(`/dashboard/search?${params.toString()}`);
-    setPage(newPage);
+  // Helper function to safely calculate pagination values
+  const getPaginationValues = (data: SearchResponse | undefined) => {
+    if (!data) {
+      return {
+        startItem: 0,
+        endItem: 0,
+        totalResults: 0,
+        currentPage: 1,
+        maxPages: 1,
+        hasMoreItems: false
+      };
+    }
+
+    const startItem = Math.max(((data.pageIndex - 1) * data.pageSize) + 1, 0);
+    const endItem = Math.min(data.pageIndex * data.pageSize, data.totalResults);
+    
+    return {
+      startItem,
+      endItem,
+      totalResults: data.totalResults,
+      currentPage: data.pageIndex,
+      maxPages: data.maxPages || 1,
+      hasMoreItems: data.hasMoreItems
+    };
   };
 
-  // Calculate total pages
-  const totalPages = data?.maxPages || 1;
+  // Get pagination values
+  const {
+    startItem,
+    endItem,
+    totalResults,
+    currentPage,
+    maxPages,
+    hasMoreItems
+  } = getPaginationValues(data);
 
   return (
-    <div className="space-y-6">
+    <div className="container mx-auto py-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Search Gunbroker</h1>
       </div>
@@ -223,10 +348,20 @@ export default function SearchPage() {
                             <SelectValue placeholder="Sort by..." />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="EndingSoonest">Ending Soonest</SelectItem>
-                            <SelectItem value="PriceHighToLow">Price (High to Low)</SelectItem>
-                            <SelectItem value="PriceLowToHigh">Price (Low to High)</SelectItem>
-                            <SelectItem value="NewestListed">Newest Listed</SelectItem>
+                            <SelectItem value="13">Featured & Relevance</SelectItem>
+                            <SelectItem value="0">Ending Soonest</SelectItem>
+                            <SelectItem value="1">Ending Latest</SelectItem>
+                            <SelectItem value="4">Price (Low to High)</SelectItem>
+                            <SelectItem value="5">Price (High to Low)</SelectItem>
+                            <SelectItem value="6">Newly Listed</SelectItem>
+                            <SelectItem value="7">Recently Listed</SelectItem>
+                            <SelectItem value="8">Fewest Bids</SelectItem>
+                            <SelectItem value="9">Most Bids</SelectItem>
+                            <SelectItem value="10">Lowest Quantity</SelectItem>
+                            <SelectItem value="11">Highest Quantity</SelectItem>
+                            <SelectItem value="12">Relevance</SelectItem>
+                            <SelectItem value="2">Item # (Ascending)</SelectItem>
+                            <SelectItem value="3">Item # (Descending)</SelectItem>
                           </SelectContent>
                         </Select>
                       </FormControl>
@@ -272,7 +407,7 @@ export default function SearchPage() {
                                   <SelectValue placeholder="Select a category" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="">All Categories</SelectItem>
+                                  <SelectItem value="all">All Categories</SelectItem>
                                   <SelectItem value="2325">Pistols</SelectItem>
                                   <SelectItem value="3024">Rifles</SelectItem>
                                   <SelectItem value="2084">Shotguns</SelectItem>
@@ -301,9 +436,13 @@ export default function SearchPage() {
                                   <SelectValue placeholder="Any condition" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="">Any Condition</SelectItem>
-                                  <SelectItem value="New">New Only</SelectItem>
-                                  <SelectItem value="Used">Used Only</SelectItem>
+                                  <SelectItem value="0">All Conditions</SelectItem>
+                                  <SelectItem value="1">New Items Only</SelectItem>
+                                  <SelectItem value="2">New and New Old Stock</SelectItem>
+                                  <SelectItem value="3">Used and New Old Stock</SelectItem>
+                                  <SelectItem value="4">Used Items Only</SelectItem>
+                                  <SelectItem value="5">New Old Stock Only</SelectItem>
+                                  <SelectItem value="6">New and Used Items</SelectItem>
                                 </SelectContent>
                               </Select>
                             </FormControl>
@@ -350,6 +489,31 @@ export default function SearchPage() {
                         />
                       </div>
                     </div>
+                    
+                    <div className="pt-4">
+                      <FormField
+                        control={form.control}
+                        name="auctionsOnly"
+                        render={({ field }) => (
+                          <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
+                            <FormControl>
+                              <Checkbox
+                                checked={field.value}
+                                onCheckedChange={field.onChange}
+                              />
+                            </FormControl>
+                            <div className="space-y-1 leading-none">
+                              <FormLabel>
+                                Auctions Only
+                              </FormLabel>
+                              <FormDescription>
+                                Show only auction listings (excludes fixed price items)
+                              </FormDescription>
+                            </div>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
                   </AccordionContent>
                 </AccordionItem>
               </Accordion>
@@ -358,143 +522,90 @@ export default function SearchPage() {
         </CardContent>
       </Card>
       
-      {/* Results */}
-      <div className="space-y-4">
-        {data?.results?.length > 0 && (
-          <div className="flex items-center justify-between border-b pb-4">
-            <p className="text-sm text-muted-foreground">
-              {(data.totalResults || 0).toLocaleString()} results found
-            </p>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">View:</span>
-              <ToggleGroup 
-                type="single" 
-                value={viewMode} 
-                onValueChange={(value) => value && setViewMode(value as 'grid' | 'list')}
-                aria-label="View mode"
-              >
-                <ToggleGroupItem value="grid" aria-label="Grid view" className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">
-                  <LayoutGrid className="h-4 w-4" />
-                </ToggleGroupItem>
-                <ToggleGroupItem value="list" aria-label="List view" className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">
-                  <List className="h-4 w-4" />
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </div>
-          </div>
-        )}
-
+      {/* Search Results */}
+      <div className="space-y-6">
         {isLoading ? (
-          // Loading state
-          <div className={viewMode === 'grid' ? 
-            "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" : 
-            "space-y-4"
-          }>
-            {[...Array(6)].map((_, i) => (
-              <Card key={i} className={viewMode === 'grid' ? "w-full" : "w-full"}>
-                <CardContent className="p-0">
-                  {viewMode === 'grid' ? (
-                    <>
-                      <div className="aspect-video w-full">
-                        <Skeleton className="h-full w-full" />
-                      </div>
-                      <div className="p-4 space-y-2">
-                        <Skeleton className="h-4 w-3/4" />
-                        <Skeleton className="h-4 w-1/2" />
-                        <Skeleton className="h-4 w-1/4" />
-                      </div>
-                    </>
-                  ) : (
-                    <div className="p-4 flex gap-4">
-                      <Skeleton className="h-24 w-24 flex-shrink-0" />
-                      <div className="flex-1 space-y-2">
-                        <Skeleton className="h-4 w-3/4" />
-                        <Skeleton className="h-4 w-1/2" />
-                        <Skeleton className="h-4 w-1/4" />
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-[300px] rounded-md" />
             ))}
           </div>
         ) : isError ? (
-          // Error state
-          <Card className="p-6">
-            <div className="text-center space-y-2">
-              <p className="text-red-500 font-medium">
-                {error instanceof Error ? error.message : 'An error occurred while searching'}
-              </p>
-              <Button onClick={() => form.handleSubmit(onSubmit)()}>
-                Try Again
-              </Button>
-            </div>
-          </Card>
-        ) : data?.results?.length ? (
-          // Results found
+          <div className="p-8 text-center">
+            <p className="text-red-500 mb-2">Error loading search results</p>
+            <p className="text-muted-foreground">{(error as Error)?.message || 'Unknown error occurred'}</p>
+          </div>
+        ) : data?.results?.length === 0 ? (
+          <div className="p-8 text-center">
+            <p className="text-xl font-semibold mb-2">No results found</p>
+            <p className="text-muted-foreground">Try adjusting your search criteria</p>
+          </div>
+        ) : (
           <>
-            <div className={viewMode === 'grid' ? 
-              "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" : 
-              "space-y-4"
-            }>
-              {data.results.map((listing: any) => (
-                <div key={listing.itemID}>
-                  {viewMode === 'grid' ? (
-                    <ListingCard listing={listing} />
-                  ) : (
-                    <Card>
-                      <CardContent className="p-4">
-                        <div className="flex gap-4">
-                          {listing.thumbnailURL && (
-                            <div className="flex-shrink-0">
-                              <img 
-                                src={listing.thumbnailURL} 
-                                alt={listing.title}
-                                className="w-24 h-24 object-cover rounded-md"
-                              />
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <h3 className="font-medium text-sm line-clamp-2">{listing.title}</h3>
-                            <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-                              <p>Price: ${listing.buyPrice || listing.currentPrice}</p>
-                              <p>Seller: {listing.seller?.username}</p>
-                              <p>Time Left: {listing.timeLeft}</p>
-                              <div className="flex gap-2 mt-2">
-                                <Button size="sm" variant="outline">View Details</Button>
-                                <Button size="sm">Buy Now</Button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )}
-                </div>
-              ))}
+            <div className="flex items-center justify-between">
+              <p className="text-muted-foreground">
+                {data?.totalResults ? `Showing ${data.results.length} of ${data.totalResults} results` : 'No results found'}
+              </p>
+              <div className="lg:hidden">
+                <ToggleGroup type="single" value={viewMode} onValueChange={(value) => setViewMode(value as 'grid' | 'list')}>
+                  <ToggleGroupItem value="grid" aria-label="Grid view">
+                    <LayoutGrid className="h-4 w-4" />
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="list" aria-label="List view">
+                    <List className="h-4 w-4" />
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              </div>
             </div>
             
-            {totalPages > 1 && (
-              <div className="flex justify-center mt-6">
-                <Pagination
-                  currentPage={page}
-                  totalPages={totalPages}
-                  onPageChange={handlePageChange}
-                />
+            {viewMode === 'grid' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {data?.results?.map((result) => (
+                  <ListingCard key={result.itemID} listing={result} />
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {data?.results?.map((result) => (
+                  <ListingCard key={result.itemID} listing={result} />
+                ))}
               </div>
             )}
-          </>
-        ) : (
-          // No results
-          <Card className="p-6">
-            <div className="text-center space-y-2">
-              <p className="text-muted-foreground">
-                No items found matching your search criteria
-              </p>
+            
+            {/* Pagination Controls */}
+            <div className="flex items-center justify-between border-t pt-4">
+              <div className="text-sm text-muted-foreground">
+                {totalResults > 0 ? (
+                  `Showing ${startItem} to ${endItem} of ${totalResults} results`
+                ) : (
+                  'No results found'
+                )}
+              </div>
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPageIndex(prev => Math.max(1, prev - 1))}
+                  disabled={pageIndex <= 1}
+                >
+                  Previous
+                </Button>
+                <div className="text-sm text-muted-foreground">
+                  Page {currentPage} of {maxPages}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPageIndex(prev => Math.min(maxPages, prev + 1))}
+                  disabled={!hasMoreItems || pageIndex >= maxPages}
+                >
+                  Next
+                </Button>
+              </div>
             </div>
-          </Card>
+          </>
         )}
       </div>
     </div>
   );
-} 
+}

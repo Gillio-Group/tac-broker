@@ -1,72 +1,34 @@
 import { Session } from '@supabase/supabase-js';
-
-// Use the correct storage key format for Supabase
-const STORAGE_KEY = 'sb-localhost-auth-token';
+import { createClient } from '@/lib/supabase/client';
 
 /**
- * Utility functions for handling authentication with localStorage
- * For Next.js 15 compatibility (avoids cookie parsing issues)
+ * Utility functions for handling authentication with Supabase SSR
+ * For Next.js 15 compatibility using cookie-based auth
  */
 
 /**
- * Get the Supabase session from localStorage
+ * Get the Supabase session using the client
  */
-export function getSessionFromLocalStorage(): Session | null {
+export async function getSession(): Promise<Session | null> {
   try {
-    if (typeof window === 'undefined') return null;
+    const supabase = createClient();
+    const { data: { session }, error } = await supabase.auth.getSession();
     
-    const value = window.localStorage.getItem(STORAGE_KEY);
-    if (!value) {
-      console.log('No session found in localStorage');
+    if (error) {
+      console.error('Error getting session:', error);
+      return null;
+    }
+    
+    if (!session) {
+      console.log('No session found');
       return null;
     }
 
-    // Parse and validate the session data
-    const parsed = JSON.parse(value);
-    if (!parsed?.access_token || !parsed?.refresh_token) {
-      console.log('Invalid session data in localStorage:', parsed);
-      window.localStorage.removeItem(STORAGE_KEY);
-      return null;
-    }
-
-    console.log('Found valid session in localStorage');
-    return parsed;
+    console.log('Found valid session');
+    return session;
   } catch (error) {
-    console.error('Error reading session from localStorage:', error);
+    console.error('Error retrieving session:', error);
     return null;
-  }
-}
-
-/**
- * Save the Supabase session to localStorage
- */
-export function saveSessionToLocalStorage(session: Session | null): void {
-  try {
-    if (typeof window === 'undefined') return;
-    
-    if (!session?.access_token || !session?.refresh_token) {
-      console.error('Attempted to save invalid session:', session);
-      return;
-    }
-
-    const serialized = JSON.stringify(session);
-    window.localStorage.setItem(STORAGE_KEY, serialized);
-    console.log('Session saved to localStorage');
-  } catch (error) {
-    console.error('Error saving session to localStorage:', error);
-  }
-}
-
-/**
- * Clear the session from localStorage
- */
-export function clearSessionFromLocalStorage(): void {
-  try {
-    if (typeof window === 'undefined') return;
-    window.localStorage.removeItem(STORAGE_KEY);
-    console.log('Session cleared from localStorage');
-  } catch (error) {
-    console.error('Error clearing session from localStorage:', error);
   }
 }
 
@@ -87,16 +49,52 @@ export function isValidSession(session: any): session is Session {
 }
 
 /**
- * Get the access token from localStorage
+ * Get the access token from the session
  */
-export function getAccessTokenFromLocalStorage(): string | null {
-  const session = getSessionFromLocalStorage();
+export async function getAccessToken(): Promise<string | null> {
+  const session = await getSession();
   return session?.access_token || null;
 }
 
 /**
- * Check if the user is authenticated based on localStorage
+ * Check if the user is authenticated
  */
-export function isAuthenticated(): boolean {
-  return !!getSessionFromLocalStorage();
+export async function isAuthenticated(): Promise<boolean> {
+  const session = await getSession();
+  return !!session;
+}
+
+// Legacy functions for backward compatibility - these will use the new methods internally
+// but maintain the same function signatures for easier migration
+
+/**
+ * @deprecated Use getSession() instead
+ */
+export function getSessionFromLocalStorage(): Session | null {
+  console.warn('getSessionFromLocalStorage is deprecated. Use getSession() instead');
+  // Return null synchronously - callers should migrate to the async version
+  return null;
+}
+
+/**
+ * @deprecated No longer needed with cookie-based auth
+ */
+export function saveSessionToLocalStorage(session: Session | null): void {
+  console.warn('saveSessionToLocalStorage is deprecated. Sessions are now managed via cookies');
+}
+
+/**
+ * @deprecated No longer needed with cookie-based auth
+ */
+export function clearSessionFromLocalStorage(): void {
+  console.warn('clearSessionFromLocalStorage is deprecated. Use supabase.auth.signOut() instead');
+}
+
+/**
+ * @deprecated Use getAccessToken() instead
+ */
+export function getAccessTokenFromLocalStorage(): string | null {
+  console.warn('getAccessTokenFromLocalStorage is deprecated. Use getAccessToken() instead');
+  // Return null synchronously - callers should migrate to the async version
+  return null;
 }

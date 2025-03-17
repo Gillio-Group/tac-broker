@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { supabase } from '@/lib/supabase/client';
+import { createClient } from '@/lib/supabase/client';
 import { ensureUserProfile } from '@/lib/profile-utils';
 
 export default function SignUpPage() {
@@ -17,6 +17,7 @@ export default function SignUpPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const supabase = createClient();
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,6 +31,7 @@ export default function SignUpPage() {
           data: {
             name,
           },
+          emailRedirectTo: window.location.origin + '/auth/callback?next=/dashboard',
         },
       });
 
@@ -128,4 +130,4 @@ export default function SignUpPage() {
       </Card>
     </div>
   );
-} 
+}

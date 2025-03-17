@@ -1,4 +1,6 @@
-import { SupabaseClient, User } from '@supabase/supabase-js';
+import { User } from '@supabase/supabase-js';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { Database } from './database.types';
 
 export interface Profile {
   id: string;
@@ -13,7 +15,7 @@ export interface Profile {
  * Creates a user profile if it doesn't exist
  */
 export async function ensureUserProfile(
-  supabase: SupabaseClient,
+  supabase: SupabaseClient<Database>,
   user: User,
   additionalData: Partial<Profile> = {}
 ): Promise<{ profile: Profile | null; error: any }> {
@@ -71,7 +73,7 @@ export async function ensureUserProfile(
  * Fetches a user profile by user ID
  */
 export async function getUserProfile(
-  supabase: SupabaseClient,
+  supabase: SupabaseClient<Database>,
   userId: string
 ): Promise<{ profile: Profile | null; error: any }> {
   try {

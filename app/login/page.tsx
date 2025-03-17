@@ -1,23 +1,25 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { supabase } from '@/lib/supabase/client';
+import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { ensureUserProfile } from '@/lib/profile-utils';
 
-export default function LoginPage() {
+// Create a client component for the parts that use useSearchParams
+function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirect = searchParams.get('redirect') || '/dashboard';
+  const supabase = createClient();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,9 +30,6 @@ export default function LoginPage() {
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
-        options: {
-          redirectTo: window.location.origin + redirect,
-        }
       });
 
       if (error) {
@@ -45,33 +44,11 @@ export default function LoginPage() {
         return;
       }
 
-      // Explicitly set the session in the client
-      console.log('Setting session in Supabase client...');
-      const { error: sessionError } = await supabase.auth.setSession({
-        access_token: data.session.access_token,
-        refresh_token: data.session.refresh_token,
-      });
-
-      if (sessionError) {
-        console.error('Error setting session:', sessionError);
-        toast.error('Failed to initialize session');
-        return;
-      }
-
-      // Force the client to refresh the auth state
-      const { data: { session }, error: refreshError } = await supabase.auth.getSession();
-      
-      if (refreshError || !session) {
-        console.error('Error refreshing session:', refreshError);
-        toast.error('Failed to verify session');
-        return;
-      }
-
       console.log('Login successful, session established');
       
       // Ensure profile exists for the user
       try {
-        const { profile, error: profileError } = await ensureUserProfile(supabase, session.user);
+        const { profile, error: profileError } = await ensureUserProfile(supabase, data.session.user);
         
         if (profileError) {
           console.error('Error ensuring user profile:', profileError);
@@ -85,10 +62,12 @@ export default function LoginPage() {
       }
       
       toast.success('Logged in successfully');
+      
+      // Directly navigate to the redirect URL
+      console.log('Redirecting to:', redirect);
       router.push(redirect);
-      router.refresh();
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Unexpected error during login:', error);
       toast.error('An unexpected error occurred');
     } finally {
@@ -96,6 +75,57 @@ export default function LoginPage() {
     }
   };
 
+  return (
+    <form onSubmit={handleLogin} className="space-y-6">
+      <div className="space-y-2">
+        <Label htmlFor="email">Email</Label>
+        <Input
+          id="email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="Enter your email"
+          className="w-full"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="password">Password</Label>
+        <Input
+          id="password"
+          name="password"
+          type="password"
+          autoComplete="current-password"
+          required
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Enter your password"
+          className="w-full"
+        />
+      </div>
+
+      <Button 
+        type="submit" 
+        className="w-full" 
+        disabled={isLoading}
+      >
+        {isLoading ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Signing in...
+          </>
+        ) : (
+          'Sign in'
+        )}
+      </Button>
+    </form>
+  );
+}
+
+export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <Card className="w-full max-w-md">
@@ -106,52 +136,9 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleLogin} className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Enter your email"
-                className="w-full"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
-                className="w-full"
-              />
-            </div>
-
-            <Button 
-              type="submit" 
-              className="w-full" 
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Signing in...
-                </>
-              ) : (
-                'Sign in'
-              )}
-            </Button>
-          </form>
+          <Suspense fallback={<div>Loading...</div>}>
+            <LoginForm />
+          </Suspense>
         </CardContent>
       </Card>
     </div>

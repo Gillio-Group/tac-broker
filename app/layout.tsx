@@ -2,10 +2,13 @@
 
 import './globals.css';
 import { Inter } from 'next/font/google';
-import { Toaster } from '@/components/ui/sonner';
+import { Toaster } from '@/components/ui/toaster';
 import { SupabaseAuthProvider } from '@/components/providers/supabase-auth-provider';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
+import { Toaster as SonnerToaster } from 'sonner';
+import { ThemeProvider } from '@/components/providers/theme-provider';
+import { cn } from '@/lib/utils';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -18,13 +21,21 @@ export default function RootLayout({
   const [queryClient] = useState(() => new QueryClient());
 
   return (
-    <html lang="en">
-      <body className={inter.className}>
+    <html lang="en" suppressHydrationWarning>
+      <body className={cn('min-h-screen bg-background font-sans antialiased', inter.className)}>
         <QueryClientProvider client={queryClient}>
-          <SupabaseAuthProvider>
-            {children}
-            <Toaster />
-          </SupabaseAuthProvider>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+          >
+            <SupabaseAuthProvider>
+              {children}
+              <Toaster />
+              <SonnerToaster />
+            </SupabaseAuthProvider>
+          </ThemeProvider>
         </QueryClientProvider>
       </body>
     </html>

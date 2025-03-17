@@ -1,6 +1,6 @@
-import { createServerClient } from '../supabase/server';
+import { createClient } from '../supabase/server';
 import { SupabaseClient } from '@supabase/supabase-js';
-import { Database } from '../types/supabase';
+import { Database } from '../database.types';
 
 /**
  * Interface for a Gunbroker token in the database
@@ -22,19 +22,16 @@ export interface TokenData {
  */
 export class TokenManager {
   private userId: string;
-  private supabase: SupabaseClient<Database>;
-  private authToken?: string;
+  private supabase: Promise<SupabaseClient<Database>>;
 
   /**
    * Create a new TokenManager instance
    * @param userId - The ID of the user whose tokens to manage
-   * @param authToken - Optional auth token for the user (from localStorage in client components)
    */
-  constructor(userId: string, authToken?: string) {
+  constructor(userId: string) {
     this.userId = userId;
-    this.authToken = authToken;
-    // Pass the auth token to createServerClient if provided
-    this.supabase = createServerClient(authToken);
+    // Use the new createClient function which handles cookies
+    this.supabase = createClient();
   }
 
   /**
@@ -45,7 +42,8 @@ export class TokenManager {
    * @param is_sandbox - Whether it's a sandbox or production token
    */
   async storeToken(userId: string, username: string, token: TokenData, is_sandbox: boolean): Promise<void> {
-    const { error } = await this.supabase
+    const supabaseClient = await this.supabase;
+    const { error } = await supabaseClient
       .from('gunbroker_integrations')
       .upsert({
         user_id: userId,
@@ -69,7 +67,8 @@ export class TokenManager {
    * @param sandbox - Whether to get a token for sandbox or production
    */
   async getLatestToken(sandbox: boolean = false): Promise<GunbrokerToken | null> {
-    const { data, error } = await this.supabase
+    const supabaseClient = await this.supabase;
+    const { data, error } = await supabaseClient
       .from('gunbroker_integrations')
       .select('*')
       .eq('user_id', this.userId)
@@ -97,7 +96,8 @@ export class TokenManager {
    * @param sandbox - Whether it's a sandbox or production token
    */
   async deleteToken(username: string, sandbox: boolean = false): Promise<void> {
-    const { error } = await this.supabase
+    const supabaseClient = await this.supabase;
+    const { error } = await supabaseClient
       .from('gunbroker_integrations')
       .update({ is_active: false })
       .eq('user_id', this.userId)
@@ -111,7 +111,8 @@ export class TokenManager {
   }
 
   async getToken(userId: string, username: string, is_sandbox: boolean): Promise<TokenData | null> {
-    const { data, error } = await this.supabase
+    const supabaseClient = await this.supabase;
+    const { data, error } = await supabaseClient
       .from('gunbroker_integrations')
       .select('access_token, last_connected_at')
       .eq('user_id', userId)
@@ -129,4 +130,4 @@ export class TokenManager {
       last_connected_at: data.last_connected_at || new Date().toISOString(),
     };
   }
-} 
+}

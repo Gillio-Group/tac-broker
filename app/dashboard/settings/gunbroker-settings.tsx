@@ -1,9 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { useAuth } from '@/components/providers/supabase-auth-provider';
-import { authenticatedFetchJson } from '@/lib/client-utils';
 
 type GunbrokerIntegration = {
   id: string;
@@ -16,70 +14,30 @@ type GunbrokerIntegration = {
   updated_at: string;
 };
 
-export default function GunbrokerSettings() {
-  const { session } = useAuth();
-  const [integrations, setIntegrations] = useState<GunbrokerIntegration[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [integration, setIntegration] = useState<GunbrokerIntegration | null>(null);
+interface GunbrokerSettingsProps {
+  integrations: GunbrokerIntegration[];
+  onDisconnect: (integrationId: string) => Promise<void>;
+}
 
-  // Fetch Gunbroker integrations
-  useEffect(() => {
-    async function fetchIntegrations() {
-      if (!session) return;
-      
-      try {
-        setLoading(true);
-        const response = await authenticatedFetchJson(
-          '/api/gunbroker/integrations',
-          session,
-          { method: 'GET' }
-        );
-        
-        if (response.success && response.integrations) {
-          setIntegrations(response.integrations);
-          setIntegration(response.integrations[0] || null);
-        }
-      } catch (error) {
-        console.error('Error fetching Gunbroker integrations:', error);
-        toast.error('Failed to load Gunbroker integrations');
-      } finally {
-        setLoading(false);
-      }
-    }
-    
-    fetchIntegrations();
-  }, [session]);
+export default function GunbrokerSettings({ integrations, onDisconnect }: GunbrokerSettingsProps) {
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [selectedIntegration, setSelectedIntegration] = useState<GunbrokerIntegration | null>(
+    integrations.length > 0 ? integrations[0] : null
+  );
 
   // Disconnect a Gunbroker account
-  async function disconnectGunbroker(integrationId: string, sandbox: boolean) {
-    if (!session) {
-      toast.error('You need to be logged in to disconnect from Gunbroker');
-      return;
-    }
-    
+  async function handleDisconnect(integrationId: string) {
     try {
       setDisconnecting(true);
+      await onDisconnect(integrationId);
       
-      const response = await authenticatedFetchJson(
-        '/api/gunbroker/disconnect',
-        session,
-        {
-          method: 'POST',
-          body: JSON.stringify({ integrationId, sandbox })
-        }
-      );
-      
-      if (response.success) {
-        toast.success(response.message || 'Successfully disconnected from Gunbroker');
-        // Remove the disconnected integration from the state
-        setIntegrations(integrations.filter(i => i.id !== integrationId));
-        setIntegration(null);
-      } else {
-        toast.error(response.error || 'Failed to disconnect from Gunbroker');
+      // Update selected integration if the disconnected one was selected
+      if (selectedIntegration && selectedIntegration.id === integrationId) {
+        setSelectedIntegration(integrations.length > 1 ? 
+          integrations.find(i => i.id !== integrationId) || null : null);
       }
     } catch (error) {
-      console.error('Error disconnecting from Gunbroker:', error);
+      console.error('Error in disconnect handler:', error);
       toast.error('An error occurred while disconnecting from Gunbroker');
     } finally {
       setDisconnecting(false);
@@ -95,9 +53,7 @@ export default function GunbrokerSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {loading ? (
-          <p>Loading integrations...</p>
-        ) : integrations.length === 0 ? (
+        {integrations.length === 0 ? (
           <p>No Gunbroker accounts connected. Go to the Connect page to add one.</p>
         ) : (
           <div className="space-y-4">
@@ -119,20 +75,12 @@ export default function GunbrokerSettings() {
                   variant="destructive" 
                   size="sm"
                   disabled={disconnecting}
-                  onClick={() => disconnectGunbroker(integration.id, integration.is_sandbox)}
+                  onClick={() => handleDisconnect(integration.id)}
                 >
                   Disconnect
                 </Button>
               </div>
             ))}
-          </div>
-        )}
-        {integration && (
-          <div className="mt-4 space-y-2 text-sm text-gray-600">
-            <p>Connected as: {integration.username}</p>
-            <p>Environment: {integration.is_sandbox ? 'Sandbox' : 'Production'}</p>
-            <p>Last Connected: {new Date(integration.last_connected_at).toLocaleString()}</p>
-            <p>Status: {integration.is_active ? 'Active' : 'Inactive'}</p>
           </div>
         )}
       </CardContent>
@@ -143,4 +91,4 @@ export default function GunbrokerSettings() {
       </CardFooter>
     </Card>
   );
-} 
+}

@@ -1,4 +1,5 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient as createSupabaseClient } from '../supabase/client';
+import { SupabaseClient } from '@supabase/supabase-js';
 import { Database } from '../database.types';
 import { 
   GunbrokerAccountInfo, 
@@ -19,6 +20,19 @@ if (!GUNBROKER_API_URL || !GUNBROKER_SANDBOX_API_URL) {
   throw new Error('Gunbroker API URLs not configured in environment variables');
 }
 
+// Define integration type
+interface GunbrokerIntegration {
+  id: string;
+  user_id: string;
+  username: string;
+  access_token: string;
+  token_expires_at: string;
+  encrypted_password: string;
+  is_active: boolean;
+  is_sandbox: boolean;
+  last_connected_at: string;
+}
+
 /**
  * GunbrokerClient - A class for interacting with the Gunbroker API
  * 
@@ -28,39 +42,21 @@ if (!GUNBROKER_API_URL || !GUNBROKER_SANDBOX_API_URL) {
  * - Managing user integrations
  */
 export class GunbrokerClient {
-  private supabase;
+  private supabase: SupabaseClient<Database>;
   private userId: string;
-  private integration: any;
+  private integration: GunbrokerIntegration | null = null;
   private baseUrl: string;
   private authToken?: string;
 
   /**
    * Create a new GunbrokerClient instance
    * @param userId - The ID of the user whose Gunbroker integration to use
-   * @param integrationId - Optional specific integration ID to use
-   * @param authToken - Optional Supabase auth token (from localStorage in client components)
    */
-  constructor(userId: string, integrationId?: string, authToken?: string) {
+  constructor(userId: string) {
     this.userId = userId;
-    this.authToken = authToken;
     
-    this.supabase = createClient<Database>(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
-      {
-        auth: {
-          persistSession: false,
-        },
-      }
-    );
-    
-    // If a token was provided, set it on the client
-    if (authToken) {
-      this.supabase.auth.setSession({
-        access_token: authToken,
-        refresh_token: ''
-      });
-    }
+    // Use the new createClient function which uses cookies
+    this.supabase = createSupabaseClient();
     
     this.baseUrl = ''; // Will be set when integration is loaded
   }
@@ -199,7 +195,7 @@ export class GunbrokerClient {
   async request<T>(
     endpoint: string, 
     method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
-    data?: any
+    data?: Record<string, unknown>
   ): Promise<T> {
     const devKey = this.integration.is_sandbox ? GUNBROKER_SANDBOX_DEV_KEY : GUNBROKER_PRODUCTION_DEV_KEY;
     if (!devKey) {
@@ -244,7 +240,7 @@ export class GunbrokerClient {
       try {
         const errorData = await response.json();
         errorMessage = errorData.message || errorMessage;
-      } catch (e) {
+      } catch (_) {
         // If we can't parse the error response, use the default message
       }
       

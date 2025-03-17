@@ -16,31 +16,29 @@ import { LogOut, Menu, Settings, User } from 'lucide-react';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { SidebarNav } from './sidebar-nav';
 import { useAuth } from '@/components/providers/supabase-auth-provider';
+import { createClient } from '@/lib/supabase/client';
 
 export function Header() {
   const router = useRouter();
   const { signOut } = useAuth();
+  const supabase = createClient();
   
   const handleLogout = async () => {
-    // Clear localStorage and sign out using the provider
     try {
-      // Use the signed out method from auth provider directly
+      // First try to use the auth provider's signOut method
       await signOut();
     } catch (error) {
-      console.error('Error during logout:', error);
+      console.error('Error during logout with auth provider:', error);
       
-      // Fallback: manually clear storage and redirect
+      // Fallback: use direct Supabase client signOut
       try {
-        const { clearSessionFromLocalStorage } = await import('@/lib/auth-utils');
-        clearSessionFromLocalStorage();
+        await supabase.auth.signOut();
         router.push('/login');
       } catch (e) {
-        console.error('Error importing auth utilities:', e);
-        // Last resort
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('supabase.auth.token');
-          window.location.href = '/login';
-        }
+        console.error('Error during direct Supabase signOut:', e);
+        
+        // Last resort: force redirect to login page
+        window.location.href = '/login';
       }
     }
   };
@@ -102,4 +100,4 @@ export function Header() {
       </div>
     </header>
   );
-} 
+}

@@ -199,7 +199,7 @@ export default function ConnectPage() {
             rel="noopener noreferrer"
             className="underline hover:no-underline"
           >
-            Don't have an account?
+            Don&apos;t have an account?
           </a>
         </CardFooter>
       </Card>
