@@ -7,6 +7,10 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useQuery } from '@tanstack/react-query';
 import { Search, Filter, SlidersHorizontal, LayoutGrid, List } from 'lucide-react';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { createClient } from '@/lib/supabase/client';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,8 +23,6 @@ import { ListingCard } from '@/components/listings/listing-card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { useAuth } from '@/components/providers/supabase-auth-provider';
 import { authenticatedFetchJson } from '@/lib/client-utils';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { createClient } from '@/lib/supabase/client';
 import { Checkbox } from '@/components/ui/checkbox';
 
 // Define the form schema
@@ -279,8 +281,16 @@ export default function SearchPage() {
 
   return (
     <div className="container mx-auto py-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Search Gunbroker</h1>
+      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+        <h1 className="text-3xl font-bold tracking-tight">Search Listings</h1>
+        <ToggleGroup type="single" value={viewMode} onValueChange={(value) => value && setViewMode(value as 'grid' | 'list')}>
+          <ToggleGroupItem value="grid" aria-label="Grid view">
+            <LayoutGrid className="h-4 w-4" />
+          </ToggleGroupItem>
+          <ToggleGroupItem value="list" aria-label="List view">
+            <List className="h-4 w-4" />
+          </ToggleGroupItem>
+        </ToggleGroup>
       </div>
       
       <Card>
@@ -518,10 +528,8 @@ export default function SearchPage() {
       {/* Search Results */}
       <div className="space-y-6">
         {isLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-[300px] rounded-md" />
-            ))}
+          <div className="flex items-center justify-center min-h-[200px]">
+            <Loader2 className="h-8 w-8 animate-spin" />
           </div>
         ) : isError ? (
           <div className="p-8 text-center">
@@ -529,8 +537,8 @@ export default function SearchPage() {
             <p className="text-muted-foreground">{(error as Error)?.message || 'Unknown error occurred'}</p>
           </div>
         ) : data?.results?.length === 0 ? (
-          <div className="p-8 text-center">
-            <p className="text-xl font-semibold mb-2">No results found</p>
+          <div className="flex flex-col items-center justify-center min-h-[200px] text-center">
+            <h3 className="font-semibold text-lg">No listings found</h3>
             <p className="text-muted-foreground">Try adjusting your search criteria</p>
           </div>
         ) : (
@@ -539,28 +547,25 @@ export default function SearchPage() {
               <p className="text-muted-foreground">
                 {data?.totalResults ? `Showing ${data.results.length} of ${data.totalResults} results` : 'No results found'}
               </p>
-              <div className="lg:hidden">
-                <ToggleGroup type="single" value={viewMode} onValueChange={(value) => setViewMode(value as 'grid' | 'list')}>
-                  <ToggleGroupItem value="grid" aria-label="Grid view">
-                    <LayoutGrid className="h-4 w-4" />
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="list" aria-label="List view">
-                    <List className="h-4 w-4" />
-                  </ToggleGroupItem>
-                </ToggleGroup>
-              </div>
             </div>
             
             {viewMode === 'grid' ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className={cn(
+                "grid gap-4",
+                "grid-cols-1",
+                "sm:grid-cols-2",
+                "lg:grid-cols-3",
+                "xl:grid-cols-4",
+                "2xl:grid-cols-5"
+              )}>
                 {data?.results?.map((result) => (
-                  <ListingCard key={result.itemID} listing={result} />
+                  <ListingCard key={result.itemID} listing={result} variant={viewMode} />
                 ))}
               </div>
             ) : (
               <div className="space-y-4">
                 {data?.results?.map((result) => (
-                  <ListingCard key={result.itemID} listing={result} />
+                  <ListingCard key={result.itemID} listing={result} variant={viewMode} />
                 ))}
               </div>
             )}
