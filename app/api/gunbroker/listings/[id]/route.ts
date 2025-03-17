@@ -10,36 +10,20 @@ if (!process.env.GUNBROKER_STAGING_URL || !process.env.GUNBROKER_PRODUCTION_URL)
   throw new Error('GunBroker API URL environment variables are not set');
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
   try {
-    // Get parameters from the URL
-    const url = new URL(request.url);
-    const searchParams = url.searchParams;
+    const itemId = params.id;
     
-    // Parse parameters with defaults
-    const page = parseInt(searchParams.get('page') || '1', 10);
-    const pageSize = parseInt(searchParams.get('pageSize') || '10', 10);
-    const timeFrame = searchParams.get('timeFrame') || '8'; // Default to "All Time"
-    const sort = searchParams.get('sort') || '0';
-    const sortOrder = searchParams.get('sortOrder') || '1';
+    if (!itemId) {
+      return NextResponse.json({ error: 'Item ID is required' }, { status: 400 });
+    }
     
-    console.log('Received request with params:', {
-      page,
-      pageSize,
-      timeFrame,
-      sort,
-      sortOrder
-    });
+    console.log(`Fetching listing details for item ID: ${itemId}`);
     
-    // Build GunBroker API query parameters
-    const gbParams = new URLSearchParams();
-    gbParams.append('PageIndex', page.toString());
-    gbParams.append('PageSize', pageSize.toString());
-    gbParams.append('TimeFrame', timeFrame);
-    gbParams.append('Sort', sort);
-    gbParams.append('SortOrder', sortOrder);
-
-    // Create a Supabase client using cookies - similar to the search implementation
+    // Create a Supabase client using cookies
     const cookieStore = await cookies();
     const supabase = createServerClient<Database>(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -89,13 +73,8 @@ export async function GET(request: NextRequest) {
       ? process.env.GUNBROKER_STAGING_URL 
       : process.env.GUNBROKER_PRODUCTION_URL;
 
-    // Create the API URL
-    const apiUrl = new URL('/v1/OrdersSold', baseUrl);
-    
-    // Add query parameters
-    gbParams.forEach((value, key) => {
-      apiUrl.searchParams.set(key, value);
-    });
+    // Create the API URL for the specific listing
+    const apiUrl = new URL(`/v1/Items/${itemId}`, baseUrl);
     
     console.log(`Making request to: ${apiUrl.toString()}`);
     
@@ -112,7 +91,7 @@ export async function GET(request: NextRequest) {
       // Assert devKey is string since we checked above
       const headers: HeadersInit = {
         'Content-Type': 'application/json',
-        'X-DevKey': devKey as string,
+        'X-DevKey': devKey || '',
         'X-AccessToken': token,
       };
 
@@ -129,7 +108,7 @@ export async function GET(request: NextRequest) {
         });
         
         throw new GunBrokerApiError(
-          'Error fetching orders from GunBroker',
+          'Error fetching listing details from GunBroker',
           response.status,
           errorText
         );
@@ -151,64 +130,22 @@ export async function GET(request: NextRequest) {
     const data = await response.json();
     
     // Log the structure for debugging
-    console.log('GunBroker API response structure:', {
-      hasResults: !!data.results,
-      resultCount: data.results?.length || 0,
-      hasCount: 'count' in data,
-      count: data.count,
-      pageIndex: data.pageIndex,
-      pageSize: data.pageSize
+    console.log('GunBroker API listing details response:', {
+      itemID: data.itemID,
+      title: data.title,
     });
     
-    // Transform the response to match the frontend's expected structure
-    // Make sure dates are in the right format and all required fields are present
-    const transformedResults = data.results?.map((order: any) => {
-      // Log thumbnail URLs for debugging
-      console.log(`Order ${order.orderID} item thumbnails:`, 
-        order.orderItemsCollection?.map((item: any) => item.thumbnail || 'no-thumbnail')
-      );
-      
-      return {
-        orderID: order.orderID,
-        orderDate: order.orderDateUTC || order.orderDate,
-        totalPrice: order.totalPrice,
-        orderCancelled: !!order.orderCancelled,
-        orderReturned: !!order.orderReturned,
-        orderComplete: !!order.orderComplete,
-        itemShipped: !!order.itemShipped,
-        fflReceived: !!order.fflReceived,
-        paymentReceived: !!order.paymentReceived,
-        buyerConfirmed: !!order.buyerConfirmed,
-        orderItemsCollection: order.orderItemsCollection?.map((item: any) => ({
-          itemID: item.itemID,
-          title: item.title,
-          quantity: item.quantity,
-          isFFLRequired: !!item.isFFLRequired,
-          thumbnail: item.thumbnail || null,
-          itemPrice: item.itemPrice,
-          itemCondition: item.itemCondition
-        })) || [],
-        buyer: {
-          username: order.buyer?.username || 'Unknown',
-          userID: order.buyer?.userID
-        },
-        billToName: order.billToName || '',
-        shipDateUTC: order.shipDateUTC,
-        paymentMethod: order.paymentMethod || {},
-        fflNumber: order.fflNumber
-      };
-    }) || [];
+    // Log the complete JSON response for debugging
+    console.log('Complete GunBroker item response JSON:', JSON.stringify(data, null, 2));
     
-    // Make sure the response matches the expected structure for the UI
+    // Return the listing data with minimal transformation
+    // This preserves the original data structure for use in the UI
     return NextResponse.json({
-      results: transformedResults,
-      count: data.count || 0,
-      pageIndex: data.pageIndex || page,
-      pageSize: data.pageSize || pageSize,
+      ...data,
       isSandbox: integration.is_sandbox
     });
   } catch (error) {
-    console.error('Error fetching orders:', error);
+    console.error('Error fetching listing details:', error);
     
     if (error instanceof GunBrokerApiError) {
       return NextResponse.json(
@@ -218,7 +155,7 @@ export async function GET(request: NextRequest) {
     }
     
     return NextResponse.json(
-      { error: 'Failed to fetch orders', details: error instanceof Error ? error.message : String(error) },
+      { error: 'Failed to fetch listing details', details: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }

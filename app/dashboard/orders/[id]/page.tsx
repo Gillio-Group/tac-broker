@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
+import { useQuery } from '@tanstack/react-query';
 import { 
   ArrowLeft,
   Package, 
@@ -16,7 +17,8 @@ import {
   ShieldCheck,
   ExternalLink,
   Copy,
-  Printer
+  Printer,
+  AlertCircle
 } from 'lucide-react';
 import Image from 'next/image';
 import { Separator } from '@/components/ui/separator';
@@ -27,6 +29,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 // Define the order types
 interface OrderItem {
@@ -37,7 +40,7 @@ interface OrderItem {
   salesTaxRate: number;
   salesTax: number;
   isFFLRequired: boolean;
-  thumbnail: string;
+  thumbnail?: string;
   itemCondition: string;
   serialNumber?: string;
   upc?: string;
@@ -108,106 +111,43 @@ interface OrderDetail {
   fflNumber: string;
   salesTaxTotal: number;
   items: OrderItem[];
+  orderItemsCollection?: OrderItem[];
   couponCode: string | null;
   couponValue: number;
+  isSandbox?: boolean;
 }
+
+// Fetch order details from the API
+async function fetchOrderDetails(orderId: string): Promise<OrderDetail> {
+  const response = await fetch(`/api/gunbroker/orders/${orderId}`);
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || 'Failed to fetch order details');
+  }
+  return response.json();
+}
+
+// Add a helper function to safely access items
+const getOrderItems = (orderData: OrderDetail) => {
+  // Handle both items and orderItemsCollection
+  return orderData.items || orderData.orderItemsCollection || [];
+};
 
 export default function OrderDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const { toast } = useToast();
-  const [isLoading, setIsLoading] = useState(false);
-
-  // Sample data for UI development
-  const orderData: OrderDetail = {
-    "orderID": 25311835,
-    "orderDate": "2024-07-16T09:48:00",
-    "cancelDate": null,
-    "lastModifiedDate": "2024-07-17T15:56:49",
-    "buyer": {
-      "userID": 8184560,
-      "username": "JessRipp",
-      "accountStatus": 1,
-      "feedbackRating": "A+(1)",
-      "isVerified": false,
-      "memberSince": "2024-07-16T13:39:11Z"
-    },
-    "seller": {
-      "userID": 2316746,
-      "username": "ModGuns_com",
-      "accountStatus": 1,
-      "feedbackRating": "A+(1127)",
-      "isVerified": true,
-      "memberSince": "2012-12-19T05:05:13Z"
-    },
-    "status": {
-      "5": "Order Complete"
-    },
-    "buyerReviewDate": "2024-07-16T09:49:31",
-    "sellerReviewCompleteDate": "2024-07-16T09:49:31",
-    "buyerConfirmationDate": "2024-07-16T09:49:31",
-    "paymentReceivedDate": "2024-07-16T09:49:31",
-    "fflReceivedDate": "2024-07-16T09:59:02",
-    "shipDate": "2024-07-17T15:56:49",
-    "paymentMethod": {
-      "8": "Visa / MasterCard"
-    },
-    "billToName": "Jess Ripp",
-    "billToAddress1": "Po Box 301",
-    "billToAddress2": "",
-    "billToCity": "HALES CORNERS",
-    "billToState": "WI",
-    "billToPostalCode": "53130-2073",
-    "billToCountryCode": "US",
-    "billToPhone": "(414) 678-1478",
-    "billToEmail": "jess@jessripp.com",
-    "shipToName": "BREW CITY ARMS LLC",
-    "shipToAddress1": "12121 W GREEN CT",
-    "shipToAddress2": "",
-    "shipToCity": "HALES CORNERS",
-    "shipToState": "WI",
-    "shipToPostalCode": "53130-1737",
-    "shipToCountryCode": "US",
-    "shipToPhone": "2624704828",
-    "shipToEmail": "brewcityarms@gmail.com",
-    "shipFromName": "Gun Broker",
-    "shipFromAddress1": "13575 FITZHUGH RD STE 100",
-    "shipFromAddress2": "",
-    "shipFromCity": "AUSTIN",
-    "shipFromState": "TX",
-    "shipFromPostalCode": "78736-6520",
-    "shipFromCountryCode": "US",
-    "shipFromPhone": "833-320-7278",
-    "shipFromEmail": "info@modguns.com",
-    "shipCarrier": {
-      "2": "UPS"
-    },
-    "shipClass": {},
-    "shipCost": 0.00,
-    "shipHandlingCost": null,
-    "shipInsuranceCost": null,
-    "isItemInsured": false,
-    "shipTrackingNumber": "1ZC1W2714221984882",
-    "hasSellerLeftFeedback": true,
-    "hasBuyerLeftFeedback": false,
-    "orderTotal": 1603.49,
-    "fflNumber": "3-39-XXX-XX-XX-06021",
-    "salesTaxTotal": 103.50,
-    "items": [
-      {
-        "itemID": 1053731460,
-        "title": "Sig Sauer M400 SDI XSeries 5.56 NATO 16\" 30 Rounds, Anodized Black",
-        "quantity": 1,
-        "itemPrice": 1499.99,
-        "salesTaxRate": 5.9,
-        "salesTax": 88.50,
-        "isFFLRequired": true,
-        "thumbnail": "https://assets.gunbroker.com/pics/1053731000/1053731460/thumb.jpg",
-        "itemCondition": "Unspecified"
-      }
-    ],
-    "couponCode": null,
-    "couponValue": 0.0
-  };
+  
+  // Unwrap params using React.use()
+  const unwrappedParams = use(params);
+  const orderId = unwrappedParams.id;
+  
+  // Use React Query to fetch order details
+  const { data: orderData, isLoading, error } = useQuery({
+    queryKey: ['orderDetails', orderId],
+    queryFn: () => fetchOrderDetails(orderId),
+    staleTime: 1000 * 60 * 5, // 5 minutes
+    refetchOnWindowFocus: false,
+  });
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'N/A';
@@ -228,6 +168,8 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
   };
 
   const getStatusBadge = () => {
+    if (!orderData) return <Badge className="bg-gray-500 text-white">Unknown</Badge>;
+    
     const statusValue = Object.values(orderData.status)[0] || '';
     
     if (statusValue.includes('Complete')) {
@@ -250,10 +192,12 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
   };
 
   const getPaymentMethodName = () => {
+    if (!orderData) return 'Unknown';
     return Object.values(orderData.paymentMethod)[0] || 'Unknown';
   };
 
   const getShipCarrierName = () => {
+    if (!orderData) return 'Unknown';
     return Object.values(orderData.shipCarrier)[0] || 'Standard';
   };
 
@@ -261,8 +205,109 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
     window.print();
   };
 
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="space-y-6 pb-10">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => router.push('/dashboard/orders')}
+              className="h-8 w-8 p-0"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <div>
+              <Skeleton className="h-8 w-48" />
+              <Skeleton className="h-4 w-24 mt-2" />
+            </div>
+          </div>
+        </div>
+        <Card className="p-5">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="md:col-span-2">
+              <Skeleton className="h-6 w-48 mb-4" />
+              <div className="space-y-6">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <Skeleton className="h-6 w-6 rounded-full" />
+                    <div className="flex-1">
+                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="h-4 w-3/4 mt-2" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="border-t md:border-t-0 md:border-l pt-4 md:pt-0 md:pl-6">
+              <Skeleton className="h-6 w-36 mb-4" />
+              <div className="space-y-4">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="flex justify-between">
+                    <Skeleton className="h-4 w-20" />
+                    <Skeleton className="h-4 w-16" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="space-y-6 pb-10">
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => router.push('/dashboard/orders')}
+            className="h-8 w-8 p-0"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <h1 className="text-2xl font-bold tracking-tight">Order Details</h1>
+        </div>
+        
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>
+            {error instanceof Error ? error.message : 'Failed to load order details. Please try again.'}
+          </AlertDescription>
+        </Alert>
+        
+        <Button onClick={() => router.push('/dashboard/orders')}>
+          Return to Orders
+        </Button>
+      </div>
+    );
+  }
+
+  // If we don't have order data yet, show a fallback
+  if (!orderData) {
+    return null;
+  }
+
+  // Normal render with data
   return (
     <div className="space-y-6 pb-10">
+      {/* Sandbox mode indicator */}
+      {orderData.isSandbox && (
+        <Alert className="bg-amber-50 border-amber-300">
+          <AlertCircle className="h-4 w-4 text-amber-600" />
+          <AlertTitle className="text-amber-700">Sandbox Mode</AlertTitle>
+          <AlertDescription className="text-amber-600">
+            You are viewing this order in sandbox mode. This is not a real order.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Header with back button and actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-2">
@@ -316,54 +361,62 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
                 </div>
               </div>
               
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 h-6 w-6 rounded-full bg-green-100 flex items-center justify-center">
-                  <CreditCard className="h-4 w-4 text-green-600" />
-                </div>
-                <div className="flex-1">
-                  <div className="flex justify-between">
-                    <p className="font-medium">Payment Received</p>
-                    <p className="text-sm text-muted-foreground">{formatDate(orderData.paymentReceivedDate)}</p>
+              {orderData.paymentReceivedDate && (
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 h-6 w-6 rounded-full bg-green-100 flex items-center justify-center">
+                    <CreditCard className="h-4 w-4 text-green-600" />
                   </div>
-                  <p className="text-sm text-muted-foreground">Payment via {getPaymentMethodName()}</p>
+                  <div className="flex-1">
+                    <div className="flex justify-between">
+                      <p className="font-medium">Payment Received</p>
+                      <p className="text-sm text-muted-foreground">{formatDate(orderData.paymentReceivedDate)}</p>
+                    </div>
+                    <p className="text-sm text-muted-foreground">Payment via {getPaymentMethodName()}</p>
+                  </div>
                 </div>
-              </div>
+              )}
               
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 h-6 w-6 rounded-full bg-green-100 flex items-center justify-center">
-                  <ClipboardCheck className="h-4 w-4 text-green-600" />
-                </div>
-                <div className="flex-1">
-                  <div className="flex justify-between">
-                    <p className="font-medium">FFL Received</p>
-                    <p className="text-sm text-muted-foreground">{formatDate(orderData.fflReceivedDate)}</p>
+              {orderData.fflReceivedDate && (
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 h-6 w-6 rounded-full bg-green-100 flex items-center justify-center">
+                    <ClipboardCheck className="h-4 w-4 text-green-600" />
                   </div>
-                  <p className="text-sm text-muted-foreground">FFL Number: {orderData.fflNumber}</p>
+                  <div className="flex-1">
+                    <div className="flex justify-between">
+                      <p className="font-medium">FFL Received</p>
+                      <p className="text-sm text-muted-foreground">{formatDate(orderData.fflReceivedDate)}</p>
+                    </div>
+                    <p className="text-sm text-muted-foreground">FFL Number: {orderData.fflNumber || 'N/A'}</p>
+                  </div>
                 </div>
-              </div>
+              )}
               
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 h-6 w-6 rounded-full bg-green-100 flex items-center justify-center">
-                  <Truck className="h-4 w-4 text-green-600" />
-                </div>
-                <div className="flex-1">
-                  <div className="flex justify-between">
-                    <p className="font-medium">Order Shipped</p>
-                    <p className="text-sm text-muted-foreground">{formatDate(orderData.shipDate)}</p>
+              {orderData.shipDate && (
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 h-6 w-6 rounded-full bg-green-100 flex items-center justify-center">
+                    <Truck className="h-4 w-4 text-green-600" />
                   </div>
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <span>{getShipCarrierName()}</span>
-                    <span>•</span>
-                    <span className="font-medium">{orderData.shipTrackingNumber}</span>
-                    <button 
-                      onClick={() => copyToClipboard(orderData.shipTrackingNumber, "Tracking number copied to clipboard")}
-                      className="text-primary hover:text-primary/80"
-                    >
-                      <Copy className="h-3 w-3" />
-                    </button>
+                  <div className="flex-1">
+                    <div className="flex justify-between">
+                      <p className="font-medium">Order Shipped</p>
+                      <p className="text-sm text-muted-foreground">{formatDate(orderData.shipDate)}</p>
+                    </div>
+                    {orderData.shipTrackingNumber && (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <span>{getShipCarrierName()}</span>
+                        <span>•</span>
+                        <span className="font-medium">{orderData.shipTrackingNumber}</span>
+                        <button 
+                          onClick={() => copyToClipboard(orderData.shipTrackingNumber, "Tracking number copied to clipboard")}
+                          className="text-primary hover:text-primary/80"
+                        >
+                          <Copy className="h-3 w-3" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
 
@@ -373,7 +426,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
             <dl className="space-y-2">
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">Subtotal</dt>
-                <dd className="font-medium">${orderData.items.reduce((sum, item) => sum + (item.itemPrice * item.quantity), 0).toFixed(2)}</dd>
+                <dd className="font-medium">${getOrderItems(orderData).reduce((sum, item) => sum + (item.itemPrice * item.quantity), 0).toFixed(2) || '0.00'}</dd>
               </div>
               {orderData.shipCost > 0 && (
                 <div className="flex justify-between">
@@ -414,7 +467,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
               <span>{new Intl.NumberFormat('en-US', {
                 style: 'currency',
                 currency: 'USD'
-              }).format(orderData.items.reduce((acc, item) => acc + item.itemPrice * item.quantity, 0))}</span>
+              }).format(getOrderItems(orderData).reduce((acc, item) => acc + item.itemPrice * item.quantity, 0) || 0)}</span>
             </div>
 
             {/* Shipping Costs */}
@@ -456,18 +509,8 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
                   <span>{new Intl.NumberFormat('en-US', {
                     style: 'currency',
                     currency: 'USD'
-                  }).format(orderData.items.reduce((acc, item) => acc + item.salesTax, 0))}</span>
+                  }).format(getOrderItems(orderData).reduce((acc, item) => acc + (item.salesTax || 0), 0) || 0)}</span>
                 </div>
-                
-                {orderData.salesTaxTotal > orderData.salesTaxTotal && (
-                  <div className="flex justify-between text-sm">
-                    <span>Sales Tax (Shipping)</span>
-                    <span>{new Intl.NumberFormat('en-US', {
-                      style: 'currency',
-                      currency: 'USD'
-                    }).format(orderData.salesTaxTotal - orderData.salesTaxTotal)}</span>
-                  </div>
-                )}
               </>
             )}
 
@@ -510,43 +553,54 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
           <Card className="p-5">
             <h2 className="text-lg font-medium mb-4">Order Items</h2>
             <div className="space-y-4">
-              {orderData.items.map((item) => (
-                <div key={item.itemID} className="flex gap-4 pb-4 border-b last:border-b-0 last:pb-0">
-                  <div className="h-20 w-20 overflow-hidden rounded-md bg-gray-100 flex-shrink-0">
-                    {item.thumbnail ? (
-                      <img 
-                        src={item.thumbnail} 
-                        alt={item.title} 
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <Package className="h-full w-full p-4 text-gray-400" />
-                    )}
+              {getOrderItems(orderData).length > 0 ? (
+                getOrderItems(orderData).map((item) => (
+                  <div key={item.itemID} className="flex gap-4 pb-4 border-b last:border-b-0 last:pb-0">
+                    <div className="h-20 w-20 overflow-hidden rounded-md bg-gray-100 flex-shrink-0">
+                      {item.thumbnail ? (
+                        <img 
+                          src={item.thumbnail} 
+                          alt={item.title}
+                          className="h-full w-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.src = '/placeholder.svg';
+                          }}
+                        />
+                      ) : (
+                        <div className="h-full w-full flex items-center justify-center">
+                          <img src="/placeholder.svg" alt="Placeholder" className="h-16 w-16" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex flex-col sm:flex-row sm:justify-between gap-2">
+                        <h3 className="font-medium">{item.title}</h3>
+                        <p className="font-medium whitespace-nowrap">${item.itemPrice.toFixed(2)}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-sm text-muted-foreground">
+                        <p>Qty: {item.quantity}</p>
+                        <p>Condition: {item.itemCondition}</p>
+                        {item.isFFLRequired && <p className="flex items-center gap-1"><ShieldCheck className="h-3 w-3" /> FFL Required</p>}
+                      </div>
+                      <div className="mt-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          className="h-7 gap-1 text-xs"
+                          onClick={() => window.open(`https://www.gunbroker.com/item/${item.itemID}`, '_blank')}
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          View Item
+                        </Button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex-1">
-                    <div className="flex flex-col sm:flex-row sm:justify-between gap-2">
-                      <h3 className="font-medium">{item.title}</h3>
-                      <p className="font-medium whitespace-nowrap">${item.itemPrice.toFixed(2)}</p>
-                    </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-sm text-muted-foreground">
-                      <p>Qty: {item.quantity}</p>
-                      <p>Condition: {item.itemCondition}</p>
-                      {item.isFFLRequired && <p className="flex items-center gap-1"><ShieldCheck className="h-3 w-3" /> FFL Required</p>}
-                    </div>
-                    <div className="mt-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        className="h-7 gap-1 text-xs"
-                        onClick={() => window.open(`https://www.gunbroker.com/item/${item.itemID}`, '_blank')}
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                        View Item
-                      </Button>
-                    </div>
-                  </div>
+                ))
+              ) : (
+                <div className="text-center py-4 text-muted-foreground">
+                  No items found for this order
                 </div>
-              ))}
+              )}
             </div>
           </Card>
         </TabsContent>
@@ -615,26 +669,32 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
                   <p className="text-muted-foreground">Carrier</p>
                   <p className="font-medium">{getShipCarrierName()}</p>
                 </div>
-                <div>
-                  <p className="text-muted-foreground">Tracking Number</p>
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium">{orderData.shipTrackingNumber}</p>
-                    <button 
-                      onClick={() => copyToClipboard(orderData.shipTrackingNumber, "Tracking number copied to clipboard")}
-                      className="text-primary hover:text-primary/80"
-                    >
-                      <Copy className="h-3 w-3" />
-                    </button>
+                {orderData.shipTrackingNumber && (
+                  <div>
+                    <p className="text-muted-foreground">Tracking Number</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium">{orderData.shipTrackingNumber}</p>
+                      <button 
+                        onClick={() => copyToClipboard(orderData.shipTrackingNumber, "Tracking number copied to clipboard")}
+                        className="text-primary hover:text-primary/80"
+                      >
+                        <Copy className="h-3 w-3" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Ship Date</p>
-                  <p className="font-medium">{formatShortDate(orderData.shipDate)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">FFL Number</p>
-                  <p className="font-medium">{orderData.fflNumber}</p>
-                </div>
+                )}
+                {orderData.shipDate && (
+                  <div>
+                    <p className="text-muted-foreground">Ship Date</p>
+                    <p className="font-medium">{formatShortDate(orderData.shipDate)}</p>
+                  </div>
+                )}
+                {orderData.fflNumber && (
+                  <div>
+                    <p className="text-muted-foreground">FFL Number</p>
+                    <p className="font-medium">{orderData.fflNumber}</p>
+                  </div>
+                )}
               </div>
             </div>
           </Card>

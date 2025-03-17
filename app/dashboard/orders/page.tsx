@@ -202,6 +202,7 @@ export default function OrdersPage() {
   const [isSandbox, setIsSandbox] = useState(false);
   const [hasGunbrokerIntegration, setHasGunbrokerIntegration] = useState(true);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [pageSize, setPageSize] = useState(10);
   
   // Get page from URL
   useEffect(() => {
@@ -210,6 +211,12 @@ export default function OrdersPage() {
       setPageIndex(parseInt(pageParam, 10));
     } else {
       setPageIndex(1);
+    }
+    
+    // Get page size from URL or use default
+    const pageSizeParam = searchParams.get('pageSize');
+    if (pageSizeParam) {
+      setPageSize(parseInt(pageSizeParam, 10));
     }
   }, [searchParams]);
   
@@ -285,7 +292,7 @@ export default function OrdersPage() {
         // Build query parameters
         const params = new URLSearchParams();
         params.append('page', pageIndex.toString());
-        params.append('pageSize', '10');
+        params.append('pageSize', pageSize.toString());
         params.append('timeFrame', '8'); // Default to "All Time"
         params.append('sort', '0');
         params.append('sortOrder', '1');
@@ -324,7 +331,7 @@ export default function OrdersPage() {
     }
     
     fetchOrdersData();
-  }, [pageIndex, session, hasGunbrokerIntegration, supabase.auth]);
+  }, [pageIndex, pageSize, session, hasGunbrokerIntegration, supabase.auth]);
   
   // Handle refresh
   const handleRefresh = async () => {
@@ -349,7 +356,7 @@ export default function OrdersPage() {
         // Build query parameters
         const params = new URLSearchParams();
         params.append('page', pageIndex.toString());
-        params.append('pageSize', '10');
+        params.append('pageSize', pageSize.toString());
         params.append('timeFrame', '8');
         params.append('sort', '0');
         params.append('sortOrder', '1');
@@ -378,7 +385,14 @@ export default function OrdersPage() {
   
   // Handle page change
   const handlePageChange = (page: number) => {
-    router.push(`/dashboard/orders?page=${page}`);
+    router.push(`/dashboard/orders?page=${page}&pageSize=${pageSize}`);
+  };
+  
+  // Handle page size change
+  const handlePageSizeChange = (size: string) => {
+    const newSize = parseInt(size, 10);
+    setPageSize(newSize);
+    router.push(`/dashboard/orders?page=1&pageSize=${newSize}`);
   };
   
   return (
@@ -436,6 +450,18 @@ export default function OrdersPage() {
                   <SelectItem value="4">Last 30 Days</SelectItem>
                   <SelectItem value="5">This Month</SelectItem>
                   <SelectItem value="6">Last Month</SelectItem>
+                </SelectContent>
+              </Select>
+              
+              <Select value={pageSize.toString()} onValueChange={handlePageSizeChange}>
+                <SelectTrigger id="page-size" className="w-full md:w-40">
+                  <SelectValue placeholder="Items per page" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="5">5 per page</SelectItem>
+                  <SelectItem value="10">10 per page</SelectItem>
+                  <SelectItem value="20">20 per page</SelectItem>
+                  <SelectItem value="50">50 per page</SelectItem>
                 </SelectContent>
               </Select>
               
@@ -696,7 +722,7 @@ export default function OrdersPage() {
                 <PaginationContent>
                   <PaginationItem>
                     <PaginationPrevious 
-                      href={`/dashboard/orders?page=${Math.max(1, pageIndex - 1)}`}
+                      href={`/dashboard/orders?page=${Math.max(1, pageIndex - 1)}&pageSize=${pageSize}`}
                       aria-disabled={pageIndex <= 1}
                       className={pageIndex <= 1 ? 'pointer-events-none opacity-50' : ''}
                       size="default"
@@ -704,27 +730,43 @@ export default function OrdersPage() {
                   </PaginationItem>
                   
                   {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    const pageToShow = Math.min(
-                      Math.max(pageIndex - 2 + i, 1),
-                      totalPages
-                    );
+                    // Calculate pages to show, ensuring we have proper sequence
+                    let pagesToShow: number[] = [];
+                    
+                    // If we're near the start
+                    if (pageIndex <= 3) {
+                      pagesToShow = Array.from({ length: Math.min(5, totalPages) }, (_, i) => i + 1);
+                    } 
+                    // If we're near the end
+                    else if (pageIndex > totalPages - 3) {
+                      const startPage = Math.max(1, totalPages - 4);
+                      pagesToShow = Array.from({ length: Math.min(5, totalPages) }, (_, i) => startPage + i);
+                    } 
+                    // If we're in the middle
+                    else {
+                      pagesToShow = [pageIndex - 2, pageIndex - 1, pageIndex, pageIndex + 1, pageIndex + 2]
+                        .filter(p => p > 0 && p <= totalPages);
+                    }
+                    
+                    const currentPage = pagesToShow[i];
+                    if (!currentPage || i >= pagesToShow.length) return null;
                     
                     return (
-                      <PaginationItem key={pageToShow}>
+                      <PaginationItem key={`page-${i}-${currentPage}`}>
                         <PaginationLink
-                          href={`/dashboard/orders?page=${pageToShow}`}
-                          isActive={pageToShow === pageIndex}
+                          href={`/dashboard/orders?page=${currentPage}&pageSize=${pageSize}`}
+                          isActive={currentPage === pageIndex}
                           size="default"
                         >
-                          {pageToShow}
+                          {currentPage}
                         </PaginationLink>
                       </PaginationItem>
                     );
-                  })}
+                  }).filter(Boolean)}
                   
                   <PaginationItem>
                     <PaginationNext
-                      href={`/dashboard/orders?page=${Math.min(totalPages, pageIndex + 1)}`}
+                      href={`/dashboard/orders?page=${Math.min(totalPages, pageIndex + 1)}&pageSize=${pageSize}`}
                       aria-disabled={pageIndex >= totalPages}
                       className={pageIndex >= totalPages ? 'pointer-events-none opacity-50' : ''}
                       size="default"
