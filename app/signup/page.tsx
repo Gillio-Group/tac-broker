@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase/client';
+import { ensureUserProfile } from '@/lib/profile-utils';
 
 export default function SignUpPage() {
   const router = useRouter();
@@ -34,6 +35,27 @@ export default function SignUpPage() {
 
       if (error) {
         throw error;
+      }
+
+      // Create a profile for the new user
+      if (data?.user) {
+        try {
+          console.log('Creating profile for new user:', data.user.id);
+          const { profile, error: profileError } = await ensureUserProfile(
+            supabase, 
+            data.user,
+            { full_name: name }
+          );
+            
+          if (profileError) {
+            console.error('Error creating profile during signup:', profileError);
+            // Don't block signup process if profile creation fails
+          } else if (profile) {
+            console.log('Profile created successfully for new user:', profile.id);
+          }
+        } catch (profileError) {
+          console.error('Exception creating profile:', profileError);
+        }
       }
 
       toast.success('Sign up successful! Please check your email to verify your account.');

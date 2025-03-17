@@ -10,57 +10,89 @@ import { toast } from 'sonner';
 import { Settings, User, Store } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import GunbrokerSettings from './gunbroker-settings';
+import { useAuth } from '@/components/providers/supabase-auth-provider';
+import { getSessionFromLocalStorage } from '@/lib/auth-utils';
+import { ensureUserProfile, type Profile } from '@/lib/profile-utils';
 
 export default function SettingsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
   const [gunbrokerIntegrations, setGunbrokerIntegrations] = useState<any[]>([]);
-  const [profile, setProfile] = useState<any>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const { session } = useAuth();
 
   useEffect(() => {
     async function fetchUserData() {
       setLoading(true);
       
-      // Get the current user
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        router.push('/login');
-        return;
-      }
-      
-      setUser(user);
-      
-      // Fetch user profile
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
+      try {
+        // First check context session
+        let currentSession = session;
         
-      if (profileData) {
-        setProfile(profileData);
+        // If no context session, check localStorage
+        if (!currentSession) {
+          currentSession = getSessionFromLocalStorage();
+        }
+        
+        // If still no session, redirect to login
+        if (!currentSession) {
+          console.log('No valid session found, redirecting to login');
+          router.replace('/login?redirect=/dashboard/settings');
+          return;
+        }
+
+        // Get the current user from the session
+        const currentUser = currentSession.user;
+        if (!currentUser) {
+          router.replace('/login');
+          return;
+        }
+        
+        setUser(currentUser);
+        
+        // Fetch user profile with detailed error logging
+        console.log('Fetching profile for user:', currentUser.id);
+        
+        // Use the ensureUserProfile utility to get or create the profile
+        const { profile: userProfile, error: profileError } = await ensureUserProfile(
+          supabase,
+          currentUser
+        );
+        
+        if (profileError) {
+          console.error('Error ensuring user profile:', profileError);
+          toast.error('Failed to load profile data');
+        } else if (userProfile) {
+          console.log('Profile loaded/created successfully:', userProfile);
+          setProfile(userProfile);
+        }
+        
+        // Fetch Gunbroker integrations
+        const { data: integrationsData, error: integrationsError } = await supabase
+          .from('gunbroker_integrations')
+          .select('*')
+          .eq('user_id', currentUser.id)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false });
+        
+        if (integrationsError) {
+          console.error('Error fetching integrations:', integrationsError);
+          toast.error('Failed to load integrations');
+        } else if (integrationsData) {
+          setGunbrokerIntegrations(integrationsData);
+        }
+      } catch (error) {
+        console.error('Error fetching user data:', error);
+        toast.error('Failed to load user data');
+      } finally {
+        setLoading(false);
       }
-      
-      // Fetch Gunbroker integrations
-      const { data: integrationsData, error } = await supabase
-        .from('gunbroker_integrations')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('is_active', true)
-        .order('created_at', { ascending: false });
-      
-      if (!error && integrationsData) {
-        setGunbrokerIntegrations(integrationsData);
-      }
-      
-      setLoading(false);
     }
     
     fetchUserData();
-  }, [router]);
+  }, [session, router]);
   
   const handleDisconnectGunbroker = async (integrationId: string) => {
     if (!user) return;
@@ -88,20 +120,23 @@ export default function SettingsPage() {
   const handleSignOut = async () => {
     try {
       setIsSigningOut(true);
-      // Import and use the utility function
+      
+      // Clear session from localStorage first
       const { clearSessionFromLocalStorage } = await import('@/lib/auth-utils');
       clearSessionFromLocalStorage();
       
-      // Then sign out with API
+      // Then sign out with Supabase
       await supabase.auth.signOut();
       
-      router.push('/login');
       toast.success('Signed out successfully');
+      router.replace('/login');
     } catch (error: any) {
+      console.error('Sign out error:', error);
       toast.error('Failed to sign out: ' + error.message);
       
-      // Fallback: force navigation to login
-      router.push('/login');
+      // Force clear session and redirect on error
+      localStorage.clear();
+      router.replace('/login');
     } finally {
       setIsSigningOut(false);
     }
@@ -120,6 +155,19 @@ export default function SettingsPage() {
         <div className="space-y-6">
           <Skeleton className="h-[200px] w-full" />
           <Skeleton className="h-[300px] w-full" />
+        </div>
+      </div>
+    );
+  }
+
+  // If no user data, show error state
+  if (!user) {
+    return (
+      <div className="flex h-[50vh] items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold mb-2">Unable to load settings</h2>
+          <p className="text-muted-foreground mb-4">Please try refreshing the page</p>
+          <Button onClick={() => router.refresh()}>Refresh Page</Button>
         </div>
       </div>
     );
@@ -190,4 +238,4 @@ export default function SettingsPage() {
       </div>
     </div>
   );
-} 
+}

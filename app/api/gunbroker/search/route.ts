@@ -8,8 +8,13 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const GUNBROKER_DEV_KEY = process.env.GUNBROKER_DEV_KEY;
 const GUNBROKER_SANDBOX_DEV_KEY = process.env.GUNBROKER_STAGING_DEV_KEY;
 const GUNBROKER_PRODUCTION_DEV_KEY = process.env.GUNBROKER_PRODUCTION_DEV_KEY;
-const GUNBROKER_API_URL = 'https://api.gunbroker.com';
-const GUNBROKER_SANDBOX_API_URL = 'https://api.sandbox.gunbroker.com';
+const GUNBROKER_API_URL = process.env.GUNBROKER_PRODUCTION_URL;
+const GUNBROKER_SANDBOX_API_URL = process.env.GUNBROKER_STAGING_URL;
+
+// Validate environment variables
+if (!GUNBROKER_API_URL || !GUNBROKER_SANDBOX_API_URL) {
+  throw new Error('Gunbroker API URLs not configured in environment variables');
+}
 
 // Helper function for server-side authentication
 async function withServerAuth(request: NextRequest, handler: (userId: string, supabase: any) => Promise<NextResponse>) {
@@ -63,14 +68,23 @@ async function withServerAuth(request: NextRequest, handler: (userId: string, su
   return handler(user.id, supabase);
 }
 
-// Add this function after the imports
+// Function to refresh the token
 async function refreshGunbrokerToken(integration: any, supabase: any) {
   try {
+    console.log('Starting token refresh for integration:', {
+      id: integration.id,
+      username: integration.username,
+      is_sandbox: integration.is_sandbox,
+      hasEncryptedPassword: !!integration.encrypted_password,
+      encryptedPasswordLength: integration.encrypted_password?.length
+    });
+
     // Create form data for the request
     const formData = new URLSearchParams();
     formData.append('Username', integration.username);
     
     // Get the decrypted password
+    console.log('Attempting to decrypt password...');
     const { data: decryptedPassword, error: decryptionError } = await supabase.rpc(
       'decrypt_password',
       { encrypted_password: integration.encrypted_password }
@@ -81,45 +95,79 @@ async function refreshGunbrokerToken(integration: any, supabase: any) {
       throw new Error('Failed to decrypt credentials');
     }
 
+    if (!decryptedPassword) {
+      console.error('No password returned from decryption');
+      throw new Error('Failed to decrypt password - no password returned');
+    }
+
+    console.log('Password decryption successful:', {
+      hasPassword: !!decryptedPassword,
+      passwordLength: decryptedPassword.length
+    });
+
     formData.append('Password', decryptedPassword);
 
+    // Log form data (safely)
+    console.log('Form data prepared:', {
+      formDataKeys: Array.from(formData.keys()),
+      username: integration.username,
+      hasPassword: formData.has('Password'),
+      passwordLength: formData.get('Password')?.length
+    });
+
     // Determine which API URL to use
-    const apiUrl = integration.is_sandbox ? GUNBROKER_SANDBOX_API_URL : GUNBROKER_API_URL;
+    const baseUrl = integration.is_sandbox ? GUNBROKER_SANDBOX_API_URL : GUNBROKER_API_URL;
     const devKey = integration.is_sandbox ? GUNBROKER_SANDBOX_DEV_KEY : GUNBROKER_PRODUCTION_DEV_KEY;
 
+    console.log('Making token refresh request to Gunbroker:', {
+      url: `${baseUrl}/v1/Users/AccessToken`,
+      method: 'POST',
+      contentType: 'application/x-www-form-urlencoded',
+      hasDevKey: !!devKey,
+      formDataKeys: Array.from(formData.keys())
+    });
+
     // Get a new access token from Gunbroker
-    const tokenResponse = await fetch(`${apiUrl}/v1/Users/AccessToken`, {
+    const tokenResponse = await fetch(`${baseUrl}/v1/Users/AccessToken`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'X-DevKey': devKey || '', // Ensure devKey is never undefined
-      } as HeadersInit,
+        'X-DevKey': devKey || '',
+      },
       body: formData.toString(),
     });
 
     if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text();
+      console.error('Token refresh error response:', {
+        status: tokenResponse.status,
+        statusText: tokenResponse.statusText,
+        responseBody: errorText,
+        headers: Object.fromEntries(tokenResponse.headers.entries())
+      });
       throw new Error(`Failed to refresh token: ${tokenResponse.statusText}`);
     }
 
     const tokenData = await tokenResponse.json();
-    const expirationDate = tokenData.expirationDate 
-      ? new Date(tokenData.expirationDate) 
-      : new Date(Date.now() + (tokenData.expiresIn || 3600) * 1000);
+    console.log('Token refresh successful:', {
+      hasAccessToken: !!tokenData.accessToken
+    });
 
     // Update the stored integration with the new token
     const { error: updateError } = await supabase
       .from('gunbroker_integrations')
       .update({
         access_token: tokenData.accessToken,
-        token_expires_at: expirationDate.toISOString(),
         last_connected_at: new Date().toISOString(),
       })
       .eq('id', integration.id);
 
     if (updateError) {
+      console.error('Error updating integration:', updateError);
       throw new Error('Failed to update integration with new token');
     }
 
+    console.log('Integration updated successfully with new token');
     return tokenData.accessToken;
   } catch (error) {
     console.error('Error refreshing token:', error);
@@ -127,219 +175,103 @@ async function refreshGunbrokerToken(integration: any, supabase: any) {
   }
 }
 
+// Function to make a search request
+async function makeSearchRequest(query: string, accessToken: string, baseUrl: string, devKey: string) {
+  console.log('Making search request:', {
+    url: `${baseUrl}/v1/Items`,
+    query,
+    hasAccessToken: !!accessToken,
+    hasDevKey: !!devKey
+  });
+
+  const response = await fetch(
+    `${baseUrl}/v1/Items?Keywords=${encodeURIComponent(query)}`,
+    {
+      headers: {
+        'X-DevKey': devKey || '',
+        'X-AccessToken': accessToken,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Search error:', {
+      status: response.status,
+      body: errorText
+    });
+    throw new Error(`Search request failed: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
 export async function GET(request: NextRequest) {
   return withServerAuth(request, async (userId, supabase) => {
     try {
-      // Get the search parameters from the URL
-      const searchParams = request.nextUrl.searchParams;
-      
-      // Build query parameters for Gunbroker API
-      const gbParams = new URLSearchParams();
-      
-      // Map search parameters to Gunbroker API parameters
-      if (searchParams.has('searchText')) gbParams.append('Keywords', searchParams.get('searchText')!);
-      if (searchParams.has('categoryId')) gbParams.append('Categories', searchParams.get('categoryId')!);
-      if (searchParams.has('minPrice')) gbParams.append('MinPrice', searchParams.get('minPrice')!);
-      if (searchParams.has('maxPrice')) gbParams.append('MaxPrice', searchParams.get('maxPrice')!);
-      if (searchParams.has('condition')) {
-        const condition = searchParams.get('condition');
-        if (condition === 'New') gbParams.append('Condition', '1'); // New Items Only
-        if (condition === 'Used') gbParams.append('Condition', '4'); // Used Items Only
+      const { searchParams } = new URL(request.url);
+      const searchText = searchParams.get('searchText');
+
+      if (!searchText) {
+        return NextResponse.json(
+          { error: 'Search query is required' },
+          { status: 400 }
+        );
       }
-      
-      // Sort parameters
-      if (searchParams.has('sortBy')) {
-        const sortBy = searchParams.get('sortBy');
-        switch (sortBy) {
-          case 'EndingSoonest':
-            gbParams.append('Sort', '0'); // Shortest time left Asc
-            break;
-          case 'PriceHighToLow':
-            gbParams.append('Sort', '5'); // Item price Desc
-            break;
-          case 'PriceLowToHigh':
-            gbParams.append('Sort', '4'); // Item price Asc
-            break;
-          case 'NewestListed':
-            gbParams.append('Sort', '7'); // Starting date Desc
-            break;
-          default:
-            gbParams.append('Sort', '13'); // Featured and then Relevance (default)
-        }
-      }
-      
-      // Pagination
-      const page = searchParams.has('page') ? parseInt(searchParams.get('page')!) : 1;
-      const pageSize = searchParams.has('pageSize') ? parseInt(searchParams.get('pageSize')!) : 25;
-      
-      gbParams.append('PageSize', pageSize.toString());
-      gbParams.append('PageIndex', page.toString()); // Gunbroker API uses 1-based indexing
-      
+
       // Get the user's active Gunbroker integration
       const { data: integration, error: integrationError } = await supabase
         .from('gunbroker_integrations')
         .select('*')
         .eq('user_id', userId)
         .eq('is_active', true)
-        .order('last_connected_at', { ascending: false })
-        .limit(1)
         .single();
-      
-      console.log('Integration found:', integration ? 'Yes' : 'No');
-      if (integrationError) {
-        console.error('Integration error:', integrationError);
-        return NextResponse.json(
-          { error: 'Failed to retrieve Gunbroker integration' }, 
-          { status: 500 }
-        );
-      }
-      
-      if (!integration) {
-        return NextResponse.json(
-          { error: 'No active Gunbroker integration found. Please connect your Gunbroker account first.' }, 
-          { status: 400 }
-        );
-      }
-      
-      // Log integration details (excluding sensitive data)
-      console.log('Integration details:', {
-        id: integration.id,
-        username: integration.username,
-        is_sandbox: integration.is_sandbox,
-        token_expires_at: integration.token_expires_at,
-        has_access_token: !!integration.access_token
-      });
 
-      // Check if access token is expired
-      if (integration.token_expires_at && new Date(integration.token_expires_at) < new Date()) {
-        console.error('Access token has expired');
+      if (integrationError || !integration) {
+        console.error('Error fetching integration:', integrationError);
         return NextResponse.json(
-          { error: 'Gunbroker access token has expired. Please reconnect your account.' }, 
-          { status: 401 }
+          { error: 'No active Gunbroker integration found' },
+          { status: 404 }
         );
       }
-      
-      // Determine which API URL and dev key to use
-      const apiUrl = integration.is_sandbox ? GUNBROKER_SANDBOX_API_URL : GUNBROKER_API_URL;
+
+      // Determine which API URL to use
+      const baseUrl = integration.is_sandbox ? GUNBROKER_SANDBOX_API_URL : GUNBROKER_API_URL;
       const devKey = integration.is_sandbox ? GUNBROKER_SANDBOX_DEV_KEY : GUNBROKER_PRODUCTION_DEV_KEY;
 
-      // Validate dev key
-      if (!devKey) {
-        console.error('Missing dev key for', integration.is_sandbox ? 'sandbox' : 'production');
-        return NextResponse.json(
-          { error: 'Server configuration error: Missing Gunbroker dev key' },
-          { status: 500 }
-        );
-      }
-
-      const searchUrl = `${apiUrl}/v1/Items?${gbParams.toString()}`;
-      
-      console.log('Making Gunbroker API request:', {
-        url: searchUrl,
-        params: Object.fromEntries(gbParams.entries()),
-        isSandbox: integration.is_sandbox,
-        hasDevKey: !!devKey
-      });
-      
-      // Make the request to Gunbroker API
-      let response = await fetch(searchUrl, {
-        headers: {
-          'Content-Type': 'application/json',
-          'X-DevKey': devKey,
-          'X-AccessToken': integration.access_token,
-        },
-      });
-      
-      console.log('Gunbroker API response status:', response.status);
-      
-      // If we get a 401, try refreshing the token once
-      if (response.status === 401) {
-        try {
-          console.log('Attempting to refresh access token...');
-          const newAccessToken = await refreshGunbrokerToken(integration, supabase);
+      try {
+        // Always refresh the token before making a search request
+        console.log('Refreshing token before search...');
+        const newToken = await refreshGunbrokerToken(integration, supabase);
+        
+        // Make the search request with the new token
+        console.log('Making search request with fresh token...');
+        const results = await makeSearchRequest(searchText, newToken, baseUrl, devKey);
+        
+        return NextResponse.json(results);
+      } catch (error: any) {
+        console.error('Error during search:', error);
+        
+        // If we get a 401 during token refresh, the credentials are invalid
+        if (error.message.includes('401')) {
+          // Deactivate the integration
+          await supabase
+            .from('gunbroker_integrations')
+            .update({ is_active: false })
+            .eq('id', integration.id);
           
-          // Retry the request with the new token
-          console.log('Retrying request with new access token...');
-          response = await fetch(searchUrl, {
-            headers: {
-              'Content-Type': 'application/json',
-              'X-DevKey': devKey,
-              'X-AccessToken': newAccessToken,
-            },
-          });
-        } catch (refreshError) {
-          console.error('Error refreshing token:', refreshError);
           return NextResponse.json(
-            { error: 'Failed to refresh Gunbroker access token. Please reconnect your account.' },
+            { error: 'CREDENTIALS_INVALID' },
             { status: 401 }
           );
         }
+        
+        throw error;
       }
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Gunbroker API error:', {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorText,
-          headers: Object.fromEntries(response.headers.entries())
-        });
-
-        return NextResponse.json(
-          { error: `Gunbroker API error: ${response.status} ${response.statusText}` },
-          { status: response.status }
-        );
-      }
-
-      // First get the raw response text
-      const responseText = await response.text();
-      console.log('Raw Gunbroker API response:', responseText);
-
-      // Then parse it as JSON
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (e) {
-        console.error('Failed to parse Gunbroker API response:', e);
-        return NextResponse.json(
-          { error: 'Invalid response from Gunbroker API' },
-          { status: 500 }
-        );
-      }
-
-      // Log the full structure of the response
-      console.log('Gunbroker API response structure:', {
-        keys: Object.keys(data),
-        hasItems: Array.isArray(data),
-        firstItem: Array.isArray(data) ? data[0] : null,
-        count: Array.isArray(data) ? data.length : 0
-      });
-
-      // The Gunbroker API returns a structured response with results field
-      const items = data.results || [];
-      const totalResults = data.count || 0;
-      const currentPage = data.pageIndex || page;
-      const actualPageSize = data.pageSize || pageSize;
-
-      console.log('Mapped response data:', {
-        itemCount: items.length,
-        totalResults,
-        currentPage,
-        pageSize: actualPageSize,
-        sampleItem: items[0]
-      });
-
-      return NextResponse.json({
-        results: items,
-        totalResults,
-        currentPage,
-        pageSize: actualPageSize,
-        maxPages: Math.ceil(totalResults / actualPageSize)
-      });
     } catch (error: any) {
-      console.error('Error searching Gunbroker items:', error);
+      console.error('Search error:', error);
       return NextResponse.json(
-        { error: error.message || 'An error occurred while searching items' }, 
+        { error: error.message || 'An unexpected error occurred' },
         { status: 500 }
       );
     }

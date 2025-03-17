@@ -5,19 +5,23 @@ import { toast } from 'sonner';
 import { useAuth } from '@/components/providers/supabase-auth-provider';
 import { authenticatedFetchJson } from '@/lib/client-utils';
 
-interface GunbrokerIntegration {
+type GunbrokerIntegration = {
   id: string;
   username: string;
+  access_token: string;
   is_sandbox: boolean;
-  token_expires_at: string;
+  is_active: boolean;
   last_connected_at: string;
-}
+  created_at: string;
+  updated_at: string;
+};
 
 export default function GunbrokerSettings() {
   const { session } = useAuth();
   const [integrations, setIntegrations] = useState<GunbrokerIntegration[]>([]);
   const [loading, setLoading] = useState(true);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [integration, setIntegration] = useState<GunbrokerIntegration | null>(null);
 
   // Fetch Gunbroker integrations
   useEffect(() => {
@@ -34,6 +38,7 @@ export default function GunbrokerSettings() {
         
         if (response.success && response.integrations) {
           setIntegrations(response.integrations);
+          setIntegration(response.integrations[0] || null);
         }
       } catch (error) {
         console.error('Error fetching Gunbroker integrations:', error);
@@ -69,6 +74,7 @@ export default function GunbrokerSettings() {
         toast.success(response.message || 'Successfully disconnected from Gunbroker');
         // Remove the disconnected integration from the state
         setIntegrations(integrations.filter(i => i.id !== integrationId));
+        setIntegration(null);
       } else {
         toast.error(response.error || 'Failed to disconnect from Gunbroker');
       }
@@ -103,10 +109,10 @@ export default function GunbrokerSettings() {
                     {integration.is_sandbox ? 'Sandbox' : 'Production'} mode
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Connected: {new Date(integration.last_connected_at).toLocaleString()}
+                    Last Connected: {new Date(integration.last_connected_at).toLocaleString()}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Expires: {new Date(integration.token_expires_at).toLocaleString()}
+                    Status: {integration.is_active ? 'Active' : 'Inactive'}
                   </p>
                 </div>
                 <Button 
@@ -119,6 +125,14 @@ export default function GunbrokerSettings() {
                 </Button>
               </div>
             ))}
+          </div>
+        )}
+        {integration && (
+          <div className="mt-4 space-y-2 text-sm text-gray-600">
+            <p>Connected as: {integration.username}</p>
+            <p>Environment: {integration.is_sandbox ? 'Sandbox' : 'Production'}</p>
+            <p>Last Connected: {new Date(integration.last_connected_at).toLocaleString()}</p>
+            <p>Status: {integration.is_active ? 'Active' : 'Inactive'}</p>
           </div>
         )}
       </CardContent>

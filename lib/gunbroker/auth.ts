@@ -50,7 +50,7 @@ export class GunbrokerAuthEndpoints {
       
       const response = await makeGunbrokerRequest<GunbrokerAuthResponse>(
         this.baseURL,
-        'Users/AccessToken',
+        '/v1/Users/AccessToken',
         this.devKey,
         'POST',
         formData.toString(),

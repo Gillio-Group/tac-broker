@@ -11,12 +11,11 @@ export interface Database {
     Tables: {
       gunbroker_integrations: {
         Row: {
-          id: string;
+          id: number;
           user_id: string;
           username: string;
-          encrypted_password: string;
-          access_token: string;
-          token_expires_at: string;
+          encrypted_password: string | null;
+          access_token: string | null;
           is_sandbox: boolean;
           is_active: boolean;
           created_at: string;
@@ -24,12 +23,11 @@ export interface Database {
           last_connected_at: string | null;
         };
         Insert: {
-          id?: string;
+          id?: number;
           user_id: string;
           username: string;
-          encrypted_password: string;
-          access_token: string;
-          token_expires_at: string;
+          encrypted_password?: string | null;
+          access_token?: string | null;
           is_sandbox?: boolean;
           is_active?: boolean;
           created_at?: string;
@@ -37,12 +35,11 @@ export interface Database {
           last_connected_at?: string | null;
         };
         Update: {
-          id?: string;
+          id?: number;
           user_id?: string;
           username?: string;
-          encrypted_password?: string;
-          access_token?: string;
-          token_expires_at?: string;
+          encrypted_password?: string | null;
+          access_token?: string | null;
           is_sandbox?: boolean;
           is_active?: boolean;
           created_at?: string;

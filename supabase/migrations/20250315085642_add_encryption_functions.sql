@@ -1,22 +1,6 @@
 -- Enable the pgcrypto extension if not already enabled
 CREATE EXTENSION IF NOT EXISTS "pgcrypto" WITH SCHEMA "extensions";
 
--- Add a last_connected_at column to gunbroker_integrations if it doesn't exist
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 
-        FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-        AND table_name = 'gunbroker_integrations' 
-        AND column_name = 'last_connected_at'
-    ) THEN
-        ALTER TABLE "public"."gunbroker_integrations" 
-        ADD COLUMN "last_connected_at" timestamp with time zone;
-    END IF;
-END
-$$;
-
 -- Create or replace the decrypt_password function
 CREATE OR REPLACE FUNCTION "public"."decrypt_password"("encrypted_password" "text")
 RETURNS "text"

@@ -1,4 +1,6 @@
 import { createServerClient } from '../supabase/server';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { Database } from '../types/supabase';
 
 /**
  * Interface for a Gunbroker token in the database
@@ -10,12 +12,17 @@ export interface GunbrokerToken {
   is_sandbox: boolean;
 }
 
+export interface TokenData {
+  access_token: string;
+  last_connected_at: string;
+}
+
 /**
  * Class for managing Gunbroker access tokens in the database
  */
 export class TokenManager {
   private userId: string;
-  private supabase: any;
+  private supabase: SupabaseClient<Database>;
   private authToken?: string;
 
   /**
@@ -32,52 +39,28 @@ export class TokenManager {
 
   /**
    * Store a new Gunbroker token in the database
+   * @param userId - The ID of the user
+   * @param username - The username of the token
    * @param token - The token information to store
+   * @param is_sandbox - Whether it's a sandbox or production token
    */
-  async storeToken(token: GunbrokerToken): Promise<void> {
-    // Check if a token already exists for this user and environment
-    const { data: existingToken } = await this.supabase
+  async storeToken(userId: string, username: string, token: TokenData, is_sandbox: boolean): Promise<void> {
+    const { error } = await this.supabase
       .from('gunbroker_integrations')
-      .select('id')
-      .eq('user_id', this.userId)
-      .eq('username', token.username)
-      .eq('is_sandbox', token.is_sandbox)
-      .eq('is_active', true)
-      .maybeSingle();
+      .upsert({
+        user_id: userId,
+        username,
+        access_token: token.access_token,
+        is_sandbox,
+        is_active: true,
+        last_connected_at: token.last_connected_at,
+      })
+      .eq('user_id', userId)
+      .eq('username', username)
+      .eq('is_sandbox', is_sandbox);
 
-    if (existingToken) {
-      // Update existing token
-      const { error } = await this.supabase
-        .from('gunbroker_integrations')
-        .update({
-          access_token: token.access_token,
-          token_expires_at: token.expires_at.toISOString(),
-          last_connected_at: new Date().toISOString(),
-        })
-        .eq('id', existingToken.id);
-
-      if (error) {
-        console.error('Error updating token:', error);
-        throw new Error('Failed to update token');
-      }
-    } else {
-      // Create a new token record
-      const { error } = await this.supabase
-        .from('gunbroker_integrations')
-        .insert({
-          user_id: this.userId,
-          username: token.username,
-          access_token: token.access_token,
-          token_expires_at: token.expires_at.toISOString(),
-          is_sandbox: token.is_sandbox,
-          is_active: true,
-          last_connected_at: new Date().toISOString(),
-        });
-
-      if (error) {
-        console.error('Error storing token:', error);
-        throw new Error('Failed to store token');
-      }
+    if (error) {
+      throw new Error(`Failed to store token: ${error.message}`);
     }
   }
 
@@ -125,5 +108,25 @@ export class TokenManager {
       console.error('Error deleting token:', error);
       throw new Error('Failed to delete token');
     }
+  }
+
+  async getToken(userId: string, username: string, is_sandbox: boolean): Promise<TokenData | null> {
+    const { data, error } = await this.supabase
+      .from('gunbroker_integrations')
+      .select('access_token, last_connected_at')
+      .eq('user_id', userId)
+      .eq('username', username)
+      .eq('is_sandbox', is_sandbox)
+      .eq('is_active', true)
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return {
+      access_token: data.access_token || '',
+      last_connected_at: data.last_connected_at || new Date().toISOString(),
+    };
   }
 } 

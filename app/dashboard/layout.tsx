@@ -6,7 +6,7 @@ import { useEffect } from 'react';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { Header } from '@/components/dashboard/header';
 import { SidebarNav } from '@/components/dashboard/sidebar-nav';
-import { isAuthenticated } from '@/lib/auth-utils';
+import { getSessionFromLocalStorage } from '@/lib/auth-utils';
 
 export default function DashboardLayout({
   children,
@@ -17,25 +17,26 @@ export default function DashboardLayout({
   const router = useRouter();
   const pathname = usePathname();
 
-  // Client-side auth protection with local storage
+  // Client-side auth protection
   useEffect(() => {
-    const checkAuth = () => {
-      // Check session from context
-      if (!isLoading && !session) {
-        console.log('No session in context, checking localStorage...');
-        
-        // Check localStorage directly using utility
-        if (!isAuthenticated()) {
-          console.log('No session found in localStorage, redirecting to login');
-          // Store the current path to redirect back after login
-          router.push(`/login?redirect=${encodeURIComponent(pathname)}`);
-        } else {
-          console.log('Found session in localStorage, not redirecting');
+    const checkAuth = async () => {
+      // First check context session
+      if (!session) {
+        // Then check localStorage
+        const storedSession = getSessionFromLocalStorage();
+        if (!storedSession) {
+          console.log('No valid session found, redirecting to login');
+          const currentPath = encodeURIComponent(pathname);
+          router.replace(`/login?redirect=${currentPath}`);
+          return;
         }
       }
     };
     
-    checkAuth();
+    // Only run auth check after initial loading is complete
+    if (!isLoading) {
+      checkAuth();
+    }
   }, [session, isLoading, router, pathname]);
 
   // Show loading state while checking authentication
@@ -47,7 +48,16 @@ export default function DashboardLayout({
     );
   }
 
-  // Show layout even without session from context (let useEffect handle redirect)
+  // If we have a session (either from context or localStorage), show the layout
+  const storedSession = getSessionFromLocalStorage();
+  if (!session && !storedSession) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center">
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
@@ -61,4 +71,4 @@ export default function DashboardLayout({
       </div>
     </div>
   );
-} 
+}

@@ -28,10 +28,10 @@ export class GunbrokerAPI {
    */
   constructor(config: GunbrokerAPIConfig) {
     // Determine the base URL based on sandbox mode
-    this.baseURL = config.baseURL ||
-      (config.sandbox 
-        ? process.env.GUNBROKER_STAGING_URL || 'https://api.sandbox.gunbroker.com/v1'
-        : process.env.GUNBROKER_PRODUCTION_URL || 'https://api.gunbroker.com/v1');
+    this.baseURL = new URL(
+      config.sandbox
+      ? process.env.GUNBROKER_STAGING_URL || 'https://api.sandbox.gunbroker.com'
+      : process.env.GUNBROKER_PRODUCTION_URL || 'https://api.gunbroker.com').toString();
     
     this.devKey = config.devKey;
     

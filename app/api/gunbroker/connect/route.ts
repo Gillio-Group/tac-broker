@@ -3,9 +3,15 @@ import { createClient } from '@supabase/supabase-js';
 import { Database } from '@/lib/database.types';
 
 // Environment variables
-const GUNBROKER_DEV_KEY = process.env.GUNBROKER_DEV_KEY;
-const GUNBROKER_API_URL = 'https://api.gunbroker.com';
-const GUNBROKER_SANDBOX_API_URL = 'https://api.sandbox.gunbroker.com';
+const GUNBROKER_SANDBOX_DEV_KEY = process.env.GUNBROKER_STAGING_DEV_KEY;
+const GUNBROKER_PRODUCTION_DEV_KEY = process.env.GUNBROKER_PRODUCTION_DEV_KEY;
+const GUNBROKER_API_URL = process.env.GUNBROKER_PRODUCTION_URL;
+const GUNBROKER_SANDBOX_API_URL = process.env.GUNBROKER_STAGING_URL;
+
+// Validate environment variables
+if (!GUNBROKER_API_URL || !GUNBROKER_SANDBOX_API_URL) {
+  throw new Error('Gunbroker API URLs not configured in environment variables');
+}
 
 // Helper function for server-side authentication
 async function withServerAuth(request: NextRequest, handler: (userId: string, supabase: any) => Promise<NextResponse>) {
@@ -28,20 +34,40 @@ async function withServerAuth(request: NextRequest, handler: (userId: string, su
         persistSession: false,
         autoRefreshToken: false,
       },
+      global: {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
     }
   );
   
-  // Use the token to get the user
-  const { data: { user }, error } = await supabase.auth.getUser(token);
-  
-  if (error || !user) {
+  try {
+    // First verify the token is valid
+    const { data: { user }, error: getUserError } = await supabase.auth.getUser(token);
+    
+    if (getUserError || !user) {
+      console.error('Auth error:', getUserError);
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Invalid or expired session' 
+      }, { status: 401 });
+    }
+    
+    // Set the session explicitly
+    await supabase.auth.setSession({
+      access_token: token,
+      refresh_token: ''  // We don't have refresh token in API routes
+    });
+    
+    return handler(user.id, supabase);
+  } catch (error: any) {
+    console.error('Server auth error:', error);
     return NextResponse.json({ 
       success: false, 
-      error: 'Authentication required' 
+      error: 'Authentication failed' 
     }, { status: 401 });
   }
-  
-  return handler(user.id, supabase);
 }
 
 export async function POST(request: NextRequest) {
@@ -62,8 +88,9 @@ export async function POST(request: NextRequest) {
       }
       
       // Validate environment variables
-      if (!GUNBROKER_DEV_KEY) {
-        console.error('GUNBROKER_DEV_KEY environment variable is not set');
+      const devKey = is_sandbox ? GUNBROKER_SANDBOX_DEV_KEY : GUNBROKER_PRODUCTION_DEV_KEY;
+      if (!devKey) {
+        console.error(`${is_sandbox ? 'GUNBROKER_STAGING_DEV_KEY' : 'GUNBROKER_PRODUCTION_DEV_KEY'} environment variable is not set`);
         return NextResponse.json(
           { error: 'Server configuration error' },
           { status: 500 }
@@ -79,61 +106,126 @@ export async function POST(request: NextRequest) {
       formData.append('Password', password);
       
       // Get Gunbroker access token
-      const tokenResponse = await fetch(`${baseUrl}/Users/AccessToken`, {
+      console.log(`Using Gunbroker API in ${is_sandbox ? 'sandbox' : 'production'} mode`);
+      console.log(`Dev key available: ${!!devKey}`);
+      console.log('Full request details:', {
+        url: `${baseUrl}/v1/Users/AccessToken`,
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          'X-DevKey': GUNBROKER_DEV_KEY,
+          'X-DevKey': devKey ? `${devKey.substring(0, 8)}...` : 'undefined',
+        },
+        formDataEntries: Object.fromEntries(formData.entries()),
+        formDataString: formData.toString()
+      });
+      
+      const tokenResponse = await fetch(`${baseUrl}/v1/Users/AccessToken`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-DevKey': devKey,
         },
         body: formData.toString(),
       });
       
-      // Handle potential API errors
+      // Handle potential API errors with more detail
       if (!tokenResponse.ok) {
+        console.error('Gunbroker API error:', {
+          status: tokenResponse.status,
+          statusText: tokenResponse.statusText,
+          url: tokenResponse.url
+        });
+
         let errorMessage = 'Failed to connect to Gunbroker';
+        let errorStatus = tokenResponse.status;
         
         try {
           const errorData = await tokenResponse.json();
           errorMessage = errorData.message || errorMessage;
+          
+          // Handle specific error cases
+          if (tokenResponse.status === 401) {
+            errorMessage = 'Invalid Gunbroker credentials';
+          } else if (tokenResponse.status === 429) {
+            errorMessage = 'Too many requests to Gunbroker API. Please try again later.';
+          }
         } catch (e) {
-          // If we can't parse the error response, use the default message
+          console.error('Could not parse error response:', e);
         }
         
         return NextResponse.json(
-          { error: errorMessage },
-          { status: tokenResponse.status }
+          { 
+            success: false,
+            error: errorMessage 
+          },
+          { status: errorStatus }
         );
       }
       
       // Parse the token response
       const tokenData = await tokenResponse.json();
       
-      // Validate the token response
+      // Validate the token response with more detail
       if (!tokenData.accessToken) {
+        console.error('Invalid Gunbroker API response:', tokenData);
         return NextResponse.json(
-          { error: 'Invalid response from Gunbroker API' },
+          { 
+            success: false,
+            error: 'Invalid response from Gunbroker API - no access token received' 
+          },
           { status: 502 }
         );
       }
       
-      // Convert expiration date from Gunbroker's format to ISO format
-      const expirationDate = new Date(tokenData.expirationDate);
-      
       // Store the encrypted password and token in Supabase
+      console.log('Starting password encryption...', {
+        hasPassword: !!password,
+        passwordLength: password?.length,
+        passwordType: typeof password
+      });
+
       const { data: encryptionResult, error: encryptionError } = await supabase.rpc(
         'encrypt_password',
         { password }
       );
       
       if (encryptionError) {
-        console.error('Error encrypting password:', encryptionError);
+        console.error('Error encrypting password:', {
+          error: encryptionError,
+          message: encryptionError.message,
+          details: encryptionError.details,
+          hint: encryptionError.hint
+        });
         return NextResponse.json(
-          { error: 'Failed to securely store credentials' },
+          { 
+            success: false,
+            error: `Failed to securely store credentials: ${encryptionError.message}` 
+          },
           { status: 500 }
         );
       }
+
+      if (!encryptionResult) {
+        console.error('No encryption result returned', {
+          hasPassword: !!password,
+          passwordLength: password?.length
+        });
+        return NextResponse.json(
+          { 
+            success: false,
+            error: 'Failed to encrypt password - no result returned' 
+          },
+          { status: 500 }
+        );
+      }
+
+      console.log('Password encryption successful:', {
+        hasEncryptionResult: !!encryptionResult,
+        encryptionResultLength: encryptionResult?.length
+      });
       
       // Check for existing integration for this user
+      console.log('Checking for existing integration...');
       const { data: existingIntegration } = await supabase
         .from('gunbroker_integrations')
         .select('id')
@@ -143,15 +235,21 @@ export async function POST(request: NextRequest) {
         .eq('is_active', true)
         .maybeSingle();
       
+      console.log('Existing integration:', existingIntegration);
+      
       let result;
       
       // If integration exists, update it
       if (existingIntegration) {
+        console.log('Updating existing integration:', {
+          id: existingIntegration.id,
+          hasEncryptedPassword: !!encryptionResult
+        });
+
         result = await supabase
           .from('gunbroker_integrations')
           .update({
             access_token: tokenData.accessToken,
-            token_expires_at: expirationDate.toISOString(),
             encrypted_password: encryptionResult,
             last_connected_at: new Date().toISOString(),
           })
@@ -159,6 +257,12 @@ export async function POST(request: NextRequest) {
           .select()
           .single();
       } else {
+        console.log('Creating new integration with data:', {
+          hasEncryptedPassword: !!encryptionResult,
+          username,
+          is_sandbox
+        });
+
         // Otherwise, create a new integration
         result = await supabase
           .from('gunbroker_integrations')
@@ -167,7 +271,6 @@ export async function POST(request: NextRequest) {
             username,
             encrypted_password: encryptionResult,
             access_token: tokenData.accessToken,
-            token_expires_at: expirationDate.toISOString(),
             is_sandbox,
             is_active: true,
             last_connected_at: new Date().toISOString(),
@@ -183,7 +286,13 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         );
       }
-      
+
+      console.log('Integration stored successfully:', {
+        id: result.data.id,
+        hasEncryptedPassword: !!result.data.encrypted_password,
+        encryptedPasswordLength: result.data.encrypted_password?.length
+      });
+
       // Return success response
       return NextResponse.json({
         success: true,
@@ -192,7 +301,7 @@ export async function POST(request: NextRequest) {
           id: result.data.id,
           username: result.data.username,
           is_sandbox: result.data.is_sandbox,
-          expires_at: result.data.token_expires_at,
+          last_connected_at: result.data.last_connected_at,
         },
       });
     } catch (error: any) {

@@ -1,128 +1,159 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { toast } from 'sonner';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { supabase } from '@/lib/supabase/client';
-import { useAuth } from '@/components/providers/supabase-auth-provider';
+import { toast } from 'sonner';
+import { Loader2 } from 'lucide-react';
+import { ensureUserProfile } from '@/lib/profile-utils';
 
 export default function LoginPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const redirectPath = searchParams.get('redirect') || '/dashboard';
-  const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const { session } = useAuth();
-  
-  // If already authenticated, redirect to dashboard
-  useEffect(() => {
-    if (session) {
-      router.push(redirectPath);
-    }
-  }, [session, router, redirectPath]);
+  const [isLoading, setIsLoading] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirect = searchParams.get('redirect') || '/dashboard';
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
     try {
-      // First, ensure we're logged out
-      await supabase.auth.signOut();
-      
-      // Then login with credentials
+      console.log('Attempting login...');
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
+        options: {
+          redirectTo: window.location.origin + redirect,
+        }
       });
 
       if (error) {
-        throw error;
+        console.error('Login error:', error);
+        toast.error(error.message);
+        return;
       }
 
-      // Debug session data to console
-      console.log('Login successful, session:', data.session);
+      if (!data?.session) {
+        console.error('No session data received');
+        toast.error('Failed to create session');
+        return;
+      }
+
+      // Explicitly set the session in the client
+      console.log('Setting session in Supabase client...');
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
+
+      if (sessionError) {
+        console.error('Error setting session:', sessionError);
+        toast.error('Failed to initialize session');
+        return;
+      }
+
+      // Force the client to refresh the auth state
+      const { data: { session }, error: refreshError } = await supabase.auth.getSession();
       
-      if (data?.session) {
-        // Import and use the utility function
-        import('@/lib/auth-utils').then(({ saveSessionToLocalStorage }) => {
-          saveSessionToLocalStorage(data.session);
-        });
+      if (refreshError || !session) {
+        console.error('Error refreshing session:', refreshError);
+        toast.error('Failed to verify session');
+        return;
+      }
+
+      console.log('Login successful, session established');
+      
+      // Ensure profile exists for the user
+      try {
+        const { profile, error: profileError } = await ensureUserProfile(supabase, session.user);
+        
+        if (profileError) {
+          console.error('Error ensuring user profile:', profileError);
+          // Continue anyway, as this is not critical for login
+        } else if (profile) {
+          console.log('User profile confirmed:', profile.id);
+        }
+      } catch (profileError) {
+        console.error('Exception ensuring user profile:', profileError);
+        // Continue anyway, as this is not critical for login
       }
       
       toast.success('Logged in successfully');
-      
-      // Force a reload of the page to establish session properly
-      window.location.href = redirectPath;
+      router.push(redirect);
+      router.refresh();
+
     } catch (error: any) {
-      toast.error(error.message || 'Failed to log in');
-      console.error('Login error:', error);
+      console.error('Unexpected error during login:', error);
+      toast.error('An unexpected error occurred');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // If already authenticated and waiting for redirect, show loading state
-  if (session) {
-    return <div className="flex min-h-screen items-center justify-center p-4">Redirecting...</div>;
-  }
-
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <Card className="mx-auto max-w-sm">
-        <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold">Login</CardTitle>
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Sign in to your account</CardTitle>
           <CardDescription>
-            Enter your email and password to access your account
+            Enter your email and password to access your dashboard
           </CardDescription>
         </CardHeader>
-        <form onSubmit={handleLogin}>
-          <CardContent className="space-y-4">
+        <CardContent>
+          <form onSubmit={handleLogin} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
+                name="email"
                 type="email"
-                placeholder="you@example.com"
+                autoComplete="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                placeholder="Enter your email"
+                className="w-full"
               />
             </div>
+
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">Password</Label>
-                <Link href="/forgot-password" className="text-sm text-primary underline-offset-4 hover:underline">
-                  Forgot password?
-                </Link>
-              </div>
+              <Label htmlFor="password">Password</Label>
               <Input
                 id="password"
+                name="password"
                 type="password"
+                autoComplete="current-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter your password"
+                className="w-full"
               />
             </div>
-          </CardContent>
-          <CardFooter className="flex flex-col space-y-4">
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? 'Logging in...' : 'Login'}
+
+            <Button 
+              type="submit" 
+              className="w-full" 
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Signing in...
+                </>
+              ) : (
+                'Sign in'
+              )}
             </Button>
-            <div className="text-center text-sm">
-              Don&apos;t have an account?{' '}
-              <Link href="/signup" className="text-primary underline-offset-4 hover:underline">
-                Sign up
-              </Link>
-            </div>
-          </CardFooter>
-        </form>
+          </form>
+        </CardContent>
       </Card>
     </div>
   );
-} 
+}

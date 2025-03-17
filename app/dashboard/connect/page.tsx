@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -37,6 +37,15 @@ export default function ConnectPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { session } = useAuth();
 
+  // Check for session on mount and when session changes
+  useEffect(() => {
+    if (!session) {
+      console.log('No session found, redirecting to login');
+      router.push(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
+      return;
+    }
+  }, [session, router]);
+
   // Initialize the form with react-hook-form and zod validation
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -52,16 +61,9 @@ export default function ConnectPage() {
     setIsSubmitting(true);
     
     try {
-      // Check authentication using our auth hook
-      if (!session) {
-        toast.error('You need to log in before connecting to Gunbroker.');
-        setIsSubmitting(false);
-        return;
-      }
-      
       // Call the API route with our session token using our utility
       const response = await authenticatedFetch(
-        '/api/gunbroker/auth',
+        '/api/gunbroker/connect',
         session,
         {
           method: 'POST',

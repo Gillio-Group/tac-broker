@@ -42,11 +42,12 @@ export default function SearchPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const { session } = useAuth();
   
-  // Redirect to login if no session
+  // Check for session on mount and when session changes
   useEffect(() => {
-    const localSession = getSessionFromLocalStorage();
-    if (!session && !localSession) {
-      router.push('/auth/login');
+    if (!session) {
+      console.log('No session found, redirecting to login');
+      router.push(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
+      return;
     }
   }, [session, router]);
 
@@ -362,7 +363,7 @@ export default function SearchPage() {
         {data?.results?.length > 0 && (
           <div className="flex items-center justify-between border-b pb-4">
             <p className="text-sm text-muted-foreground">
-              {data.totalResults.toLocaleString()} results found
+              {(data.totalResults || 0).toLocaleString()} results found
             </p>
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">View:</span>
