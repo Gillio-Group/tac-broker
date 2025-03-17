@@ -1,0 +1,15 @@
+{
+  "buildCommand": "npm run build",
+  "framework": "nextjs",
+  "outputDirectory": ".next",
+  "regions": ["iad1"],
+  "git": {
+    "deploymentEnabled": {
+      "main": true
+    }
+  },
+  "env": {
+    "NEXT_PUBLIC_SUPABASE_URL": "WILL_BE_SET_IN_VERCEL_DASHBOARD",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "WILL_BE_SET_IN_VERCEL_DASHBOARD"
+  }
+}
